@@ -95,7 +95,9 @@ def private_response(response, request, scope):
     return response
 
 
-def database_settings():
+def database_settings(ledger):
+    if ledger == "browser":
+        return {}
     if database_url := os.environ.get("DATABASE_URL"):
         return {"database_url": database_url}
     if not os.environ.get("VERCEL") and (db_path := os.environ.get("INVOICE_DB_PATH")):
@@ -125,22 +127,26 @@ def inference_settings():
 
 @app.get("/")
 @app.get("/api/invoice")
-def get_workspace(request: Request, demo: str | None = None, catalog_id: str = "demo"):
+def get_workspace(request: Request, demo: str | None = None, catalog_id: str = "demo",
+                  ledger: Literal["configured", "browser"] = "configured"):
     if demo:
         if demo not in SAMPLES:
             raise HTTPException(404, "Demo invoice does not exist.")
         return Response(make_invoice(*SAMPLES[demo]), media_type="application/pdf",
                         headers={"Cache-Control": "public, max-age=3600"})
-    database = database_settings()
+    database = database_settings(ledger)
     if catalog_id != "demo" and (len(catalog_id) != 64 or any(char not in "0123456789abcdef" for char in catalog_id)):
         raise HTTPException(422, "Invalid PO catalog ID.")
     scope = workspace(request) if database else None
     try:
         runs = history(scope=ledger_scope(scope, catalog_id), **database) if database else []
         default_id, orders = load_catalog()
-    except Exception:
+    except Exception as error:
         log.exception("Could not load invoice history")
-        raise HTTPException(503, "The invoice ledger is unavailable.") from None
+        detail = "The invoice ledger is unavailable."
+        if "database_url" in database and "password authentication failed" in str(error).lower():
+            detail = "PostgreSQL rejected the login. In Vercel, check DATABASE_URL and redeploy."
+        raise HTTPException(503, detail) from None
     return private_response(JSONResponse({
         "runs": runs, "ai_enabled": all(inference_settings().values()),
         "demos": list(SAMPLES), "storage": "PostgreSQL" if "database_url" in database else "SQLite",
@@ -151,14 +157,15 @@ def get_workspace(request: Request, demo: str | None = None, catalog_id: str = "
 
 @app.post("/")
 @app.post("/api/invoice")
-def run_invoice(payload: RunRequest | CatalogRequest, request: Request):
+def run_invoice(payload: RunRequest | CatalogRequest, request: Request,
+                ledger: Literal["configured", "browser"] = "configured"):
     if isinstance(payload, CatalogRequest):
         catalog_id, orders = uploaded_catalog(payload.csv)
         return JSONResponse(catalog_details(catalog_id, orders), headers={"Cache-Control": "no-store"})
     catalog_id, orders = uploaded_catalog(payload.catalog_csv)
     if catalog_id != payload.catalog_id:
         raise HTTPException(422, "The PO CSV changed. Upload it again before running the invoice.")
-    database = database_settings()
+    database = database_settings(ledger)
     scope = workspace(request) if database else None
     storage_scope = ledger_scope(scope, catalog_id) if database else None
     if not database and payload.ledger is None:

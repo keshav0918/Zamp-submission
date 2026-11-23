@@ -4,6 +4,8 @@ const $ = (selector) => document.querySelector(selector);
 const endpoint = "/api/invoice";
 const ledgerKey = "invoice-review-ledger-v1";
 const catalogKey = "invoice-review-po-catalog-v1";
+const browserDemo = new URLSearchParams(location.search).get("ledger") === "browser";
+const runEndpoint = browserDemo ? `${endpoint}?ledger=browser` : endpoint;
 const labels = {
   "01-readable-match.pdf": "01 · Readable invoice",
   "02-scanned-mistyped-po.pdf": "02 · Scanned PO typo",
@@ -21,7 +23,7 @@ const stages = [
 const state = {
   file: null, busy: false, ready: false, browserLedger: false,
   catalog: null, catalogBusy: false,
-  runs: [], demos: [], step: -1, detail: "", finished: false,
+  runs: [], step: -1, detail: "", finished: false,
 };
 
 function escape(value) {
@@ -173,7 +175,8 @@ async function errorMessage(response) {
 }
 
 function ledgerFor(catalog) {
-  return catalog ? `${ledgerKey}:${catalog.id}` : ledgerKey;
+  const key = browserDemo ? `${ledgerKey}:browser-demo` : ledgerKey;
+  return catalog ? `${key}:${catalog.id}` : key;
 }
 
 function browserLedger(key) {
@@ -194,8 +197,22 @@ function rememberedCatalog() {
   }
 }
 
+function renderSamples(demos) {
+  $("#sample-list").innerHTML = demos.map((file) =>
+    `<button class="sample" type="button" data-sample="${escape(file)}">${escape(labels[file] || file)}</button>`).join("");
+}
+
+function showLedgerNotice(message, href, label) {
+  $("#ledger-message").textContent = message;
+  $("#ledger-action").href = href;
+  $("#ledger-action").textContent = label;
+  $("#ledger-notice").hidden = false;
+}
+
 async function refreshWorkspace(catalog = state.catalog, remember = false) {
-  const response = await fetch(`${endpoint}?catalog_id=${catalog?.id ?? "demo"}`);
+  const query = new URLSearchParams({ catalog_id: catalog?.id ?? "demo" });
+  if (browserDemo) query.set("ledger", "browser");
+  const response = await fetch(`${endpoint}?${query}`);
   if (!response.ok) throw new Error(await errorMessage(response));
   const payload = await response.json();
   if (payload.browser_ledger && !navigator.locks) {
@@ -209,18 +226,21 @@ async function refreshWorkspace(catalog = state.catalog, remember = false) {
   state.browserLedger = payload.browser_ledger;
   state.catalog = catalog;
   state.runs = runs;
-  state.demos = payload.demos;
   state.ready = true;
   const connection = $("#connection");
   connection.dataset.state = "ok";
-  connection.innerHTML = payload.storage === "PostgreSQL"
-    ? "<i></i> PostgreSQL connected" : "<i></i> Ledger connected";
+  if (browserDemo) {
+    connection.innerHTML = "<i></i> Browser demo";
+    showLedgerNotice("Demo approvals and history stay in this browser.", location.pathname, "Retry configured ledger");
+  } else {
+    connection.innerHTML = payload.storage === "PostgreSQL"
+      ? "<i></i> PostgreSQL connected" : "<i></i> Ledger connected";
+  }
   $("#ai-control").hidden = !payload.ai_enabled;
   const active = catalog ?? payload.default_catalog;
   $("#catalog-status").textContent = `${catalog?.name ?? "Built-in demo POs"} · ${active.count} purchase orders · ${active.rows} line items`;
   $("#catalog-reset").hidden = !catalog;
-  $("#sample-list").innerHTML = state.demos.map((file) =>
-    `<button class="sample" type="button" data-sample="${escape(file)}">${escape(labels[file] || file)}</button>`).join("");
+  renderSamples(payload.demos);
   renderHistory();
   renderControls();
 }
@@ -294,7 +314,7 @@ async function readEvents(response) {
 }
 
 async function requestDecision(payload) {
-  const response = await fetch(endpoint, {
+  const response = await fetch(runEndpoint, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(payload),
@@ -407,8 +427,15 @@ $("#history-list").addEventListener("click", (event) => {
 
 drawSteps();
 renderHistory();
+renderSamples(Object.keys(labels));
+renderControls();
 refreshWorkspace(rememberedCatalog()).catch((error) => {
   $("#connection").dataset.state = "error";
   $("#connection").innerHTML = "<i></i> Ledger unavailable";
-  showError(error.message);
+  $("#catalog-status").textContent = "Purchase orders are waiting for the ledger connection.";
+  if (browserDemo) {
+    showLedgerNotice(error.message, location.pathname, "Retry configured ledger");
+  } else {
+    showLedgerNotice(error.message, "?ledger=browser", "Use browser demo");
+  }
 });

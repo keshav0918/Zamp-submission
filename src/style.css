@@ -72,6 +72,9 @@ h3 { font-size: 13px; margin: 0; }
 .catalog-downloads summary { cursor: pointer; font-weight: 650; }
 .catalog-downloads ul { margin: 8px 0 0; padding-left: 22px; display: grid; gap: 5px; }
 .catalog-downloads a { color: inherit; }
+.ledger-banner { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; margin: 0 0 16px; padding: 10px 13px; border: 1px solid var(--line); border-radius: 10px; background: #fff; }
+.ledger-banner p { flex: 1 1 240px; margin: 0; font-size: 13px; color: var(--muted); }
+.ledger-banner a { text-decoration: none; }
 #sample-list { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 6px; margin-top: 9px; }
 .sample { text-align: left; min-width: 0; border: 1px solid var(--line); background: white; border-radius: 7px; padding: 7px 9px; color: var(--green); font-size: 11px; font-weight: 680; }
 .sample:hover:not(:disabled) { background: #edf6eb; border-color: #9cb6a3; }

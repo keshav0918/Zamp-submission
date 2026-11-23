@@ -13,6 +13,8 @@ With `DATABASE_URL` set, PostgreSQL stores invoice decisions, approval balances,
 
 Without `DATABASE_URL`, the demo runs each reconciliation in memory using SQLite and saves its ledger in the browser. The status reads **Ledger connected** in that mode.
 
+If the configured ledger is unavailable, the sample PDFs stay visible. Select **Use browser demo** to run the same workflow with separate browser-only approvals and history. Use **Retry configured ledger** to reconnect after updating the deployment.
+
 ## Run locally
 
 Use Node.js 22+ and Python 3.12. Start these commands from the repo root in separate terminals.
