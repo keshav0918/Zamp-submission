@@ -1,5 +1,6 @@
 """Vercel Python entry point for the invoice review application."""
 
+from decimal import Decimal
 import json
 import logging
 import os
@@ -10,7 +11,7 @@ from uuid import UUID, uuid4
 
 from fastapi import FastAPI, HTTPException, Request, Response
 from fastapi.responses import JSONResponse, StreamingResponse
-from pydantic import BaseModel, Field, StringConstraints
+from pydantic import BaseModel, Field, StringConstraints, model_validator
 
 from demo import SAMPLES, make_invoice
 from extract import extract_pages
@@ -34,10 +35,37 @@ class Page(BaseModel):
     uncertain: bool = False
 
 
+LedgerText = Annotated[str, StringConstraints(min_length=1, max_length=150, pattern=r"^[^\x00]+$")]
+Quantity = Annotated[Decimal, Field(gt=0, le=1_000_000, allow_inf_nan=False)]
+
+
+class Approval(BaseModel):
+    run_id: int = Field(ge=1, le=1_000_000_000)
+    vendor: LedgerText
+    invoice: LedgerText
+    po: LedgerText
+    quantities: dict[LedgerText, Quantity] = Field(min_length=1, max_length=200)
+    variance: Decimal = Field(ge=0, le=1, allow_inf_nan=False)
+
+
+class BrowserLedger(BaseModel):
+    last_run_id: int = Field(ge=0, lt=1_000_000_000)
+    approvals: list[Approval] = Field(max_length=1000)
+
+    @model_validator(mode="after")
+    def validate_approvals(self):
+        ids = {row.run_id for row in self.approvals}
+        invoices = {(row.vendor, row.invoice) for row in self.approvals}
+        if len(ids) != len(self.approvals) or len(invoices) != len(self.approvals) or max(ids, default=0) > self.last_run_id:
+            raise ValueError("Approval history is inconsistent.")
+        return self
+
+
 class RunRequest(BaseModel):
     filename: str = Field(min_length=1, max_length=150, pattern=r"^[^\x00]+$")
     pages: list[Page] = Field(min_length=1, max_length=10)
     use_ai: bool = False
+    ledger: BrowserLedger | None = None
 
 
 def workspace(request):
@@ -53,16 +81,14 @@ def workspace(request):
 
 def private_response(response, request, scope):
     response.headers["Cache-Control"] = "private, no-store"
-    response.set_cookie(COOKIE, scope, max_age=30 * 24 * 3600, httponly=True, samesite="lax",
-                        secure=bool(os.environ.get("VERCEL")) or request.url.scheme == "https")
+    if scope:
+        response.set_cookie(COOKIE, scope, max_age=30 * 24 * 3600, httponly=True, samesite="lax",
+                            secure=request.url.scheme == "https")
     return response
 
 
-def database_settings(scope):
-    url = next((value for name in ("DATABASE_URL", "POSTGRES_URL") if (value := os.environ.get(name))), None)
-    if os.environ.get("VERCEL") and not url:
-        raise HTTPException(503, "Connect a PostgreSQL database and set DATABASE_URL in Vercel.")
-    return {"scope": scope, "database_url": url, "db_path": os.environ.get("INVOICE_DB_PATH")}
+def local_database():
+    return None if os.environ.get("VERCEL") else os.environ.get("INVOICE_DB_PATH")
 
 
 def inference_settings():
@@ -78,24 +104,26 @@ def get_workspace(request: Request, demo: str | None = None):
             raise HTTPException(404, "Demo invoice does not exist.")
         return Response(make_invoice(*SAMPLES[demo]), media_type="application/pdf",
                         headers={"Cache-Control": "public, max-age=3600"})
-    scope = workspace(request)
-    settings = database_settings(scope)
+    db_path = local_database()
+    scope = workspace(request) if db_path else None
     try:
-        runs = history(**settings)
+        runs = history(scope=scope, db_path=db_path) if db_path else []
     except Exception:
         log.exception("Could not load invoice history")
         raise HTTPException(503, "The invoice ledger is unavailable.") from None
     return private_response(JSONResponse({
         "runs": runs, "ai_enabled": all(inference_settings().values()),
-        "demos": list(SAMPLES), "storage": "PostgreSQL" if settings["database_url"] else "SQLite",
+        "demos": list(SAMPLES), "storage": "SQLite", "browser_ledger": not db_path,
     }), request, scope)
 
 
 @app.post("/")
 @app.post("/api/invoice")
 def run_invoice(payload: RunRequest, request: Request):
-    scope = workspace(request)
-    settings = database_settings(scope)
+    db_path = local_database()
+    scope = workspace(request) if db_path else None
+    if not db_path and payload.ledger is None:
+        raise HTTPException(422, "Browser history is missing. Reload the app and try again.")
     ai = inference_settings()
 
     def events():
@@ -105,22 +133,32 @@ def run_invoice(payload: RunRequest, request: Request):
             output.put({"stage": stage, "detail": detail})
 
         def run():
-            outcome = None
             try:
                 emit("extract", "Reading vendor, invoice number, totals and line items from the PDF")
                 invoice = extract_pages([page.model_dump() for page in payload.pages])
-                outcome = reconcile(invoice, payload.filename, emit, **settings)
+                if db_path:
+                    outcome = reconcile(invoice, payload.filename, emit, scope=scope, db_path=db_path)
+                else:
+                    outcome = reconcile(
+                        invoice, payload.filename, emit,
+                        approvals=[row.model_dump(mode="json") for row in payload.ledger.approvals],
+                        run_id=payload.ledger.last_run_id + 1,
+                    )
+                approval = outcome.pop("approval", None)
                 if outcome["status"] == "Needs review" and payload.use_ai and all(ai.values()):
                     emit("advice", "Generating optional guidance from the reconciliation evidence")
                     try:
                         advice = infer_review(outcome, **ai)
-                        outcome = save_review_advice(outcome, advice, **settings)
+                        if db_path:
+                            outcome = save_review_advice(outcome, advice, scope=scope, db_path=db_path)
+                        else:
+                            outcome["review_advice"] = advice
                     except InferenceUnavailable:
                         outcome["advice_unavailable"] = True
                     except Exception:
                         log.exception("Could not save AI guidance")
                         outcome["advice_unavailable"] = True
-                output.put({"outcome": outcome})
+                output.put({"outcome": outcome, "approval": approval})
             except Exception:
                 log.exception("Invoice processing failed")
                 output.put({"error": "The invoice run could not be completed. Refresh history before retrying."})

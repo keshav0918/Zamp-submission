@@ -115,8 +115,8 @@ def compare_lines(invoice, order_lines, used):
     return results, consumed, variance
 
 
-def history(*, scope="", database_url=None, db_path=None):
-    with open_ledger(scope=scope, database_url=database_url, db_path=db_path) as ledger:
+def history(*, scope="", db_path=None):
+    with open_ledger(db_path=db_path) as ledger:
         return [
             {"run_id": run_id, "created": str(created), "filename": filename, "outcome": json.loads(outcome)}
             for run_id, created, filename, outcome in ledger.execute("""
@@ -126,9 +126,9 @@ def history(*, scope="", database_url=None, db_path=None):
         ]
 
 
-def save_review_advice(outcome, advice, *, scope="", database_url=None, db_path=None):
+def save_review_advice(outcome, advice, *, scope="", db_path=None):
     annotated = {**outcome, "review_advice": advice}
-    with open_ledger(scope=scope, database_url=database_url, db_path=db_path) as ledger:
+    with open_ledger(db_path=db_path) as ledger:
         ledger.execute("""
             UPDATE ap_runs SET outcome = ? WHERE scope = ? AND id = ? AND status = 'Needs review'
         """, (json.dumps(annotated), scope, outcome["run_id"]))
@@ -137,6 +137,8 @@ def save_review_advice(outcome, advice, *, scope="", database_url=None, db_path=
 
 def validate(invoice):
     reasons = list(invoice.issues)
+    if len(invoice.number.strip().upper()) > 150:
+        reasons.append("Invoice number exceeds the supported length.")
     line_sum = sum((line.total for line in invoice.lines), Decimal("0"))
     calculated_sum = sum((line.quantity * line.unit_price for line in invoice.lines), Decimal("0"))
     if abs(calculated_sum - line_sum) > CENT:
@@ -168,14 +170,25 @@ def _match(invoice, orders, used_by_po):
     return "", "No candidate", [], "No matching open PO was found in the approved dataset."
 
 
-def reconcile(invoice, filename, stage=lambda _: None, *, scope="", database_url=None, db_path=None):
+def reconcile(invoice, filename, stage=lambda *_: None, *, scope="", db_path=None, approvals=None, run_id=None):
     stage("validate", "Checking required fields and invoice arithmetic")
     reasons = validate(invoice)
     orders = load_orders()
     if not any(normalize(lines[0]["vendor"]) == normalize(invoice.vendor) for lines in orders.values()):
         reasons.append("Vendor is outside the approved PO dataset.")
 
-    with open_ledger(scope=scope, database_url=database_url, db_path=db_path, write=True) as ledger:
+    if approvals is not None:
+        db_path = ":memory:"
+    with open_ledger(db_path=db_path, write=True) as ledger:
+        if approvals:
+            ledger.executemany("""
+                INSERT INTO ap_runs (id, scope, filename, vendor, invoice, po, status, outcome, quantities, variance)
+                VALUES (?, ?, '', ?, ?, ?, 'Approved', '{}', ?, ?)
+            """, [
+                (prior["run_id"], scope, prior["vendor"], prior["invoice"], prior["po"],
+                 json.dumps(prior["quantities"]), prior["variance"])
+                for prior in approvals
+            ])
         stage("match", "Trying the exact reference, then comparing open purchase orders")
         used_by_po = defaultdict(lambda: defaultdict(Decimal))
         po_variances = defaultdict(Decimal)
@@ -229,8 +242,13 @@ def reconcile(invoice, filename, stage=lambda _: None, *, scope="", database_url
         stage("decision", "Recording the decision and any approved quantity changes")
         quantities = {sku: str(quantity) for sku, quantity in consumed.items()} if status == "Approved" else {}
         outcome["run_id"] = ledger.execute("""
-            INSERT INTO ap_runs (scope, filename, vendor, invoice, po, status, outcome, quantities, variance)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING id
-        """, (scope, filename, vendor_key, invoice_key, order_po, status, json.dumps(outcome),
+            INSERT INTO ap_runs (id, scope, filename, vendor, invoice, po, status, outcome, quantities, variance)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING id
+        """, (run_id, scope, filename, vendor_key, invoice_key, order_po, status, json.dumps(outcome),
               json.dumps(quantities), str(variance) if status == "Approved" else "0")).fetchone()[0]
+        if approvals is not None and status == "Approved":
+            outcome["approval"] = {
+                "run_id": outcome["run_id"], "vendor": vendor_key, "invoice": invoice_key,
+                "po": order_po, "quantities": quantities, "variance": str(variance),
+            }
     return outcome

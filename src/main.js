@@ -2,6 +2,7 @@ import "./style.css";
 
 const $ = (selector) => document.querySelector(selector);
 const endpoint = "/api/invoice";
+const ledgerKey = "invoice-review-ledger-v1";
 const labels = {
   "01-readable-match.pdf": "01 · Readable invoice",
   "02-scanned-mistyped-po.pdf": "02 · Scanned PO typo",
@@ -16,7 +17,10 @@ const stages = [
   ["decision", "Record the decision", "Save the result and update balances for approvals."],
   ["advice", "Generate AI guidance", "Suggest what the analyst should verify."],
 ];
-const state = { file: null, busy: false, ready: false, runs: [], demos: [], step: -1, detail: "", finished: false };
+const state = {
+  file: null, busy: false, ready: false, browserLedger: false,
+  runs: [], demos: [], step: -1, detail: "", finished: false,
+};
 
 function escape(value) {
   return String(value ?? "—").replace(/[&<>"']/g, (character) => ({
@@ -163,11 +167,24 @@ async function errorMessage(response) {
   return typeof body?.detail === "string" ? body.detail : `The request could not be completed (${response.status}).`;
 }
 
+function browserLedger() {
+  try {
+    return JSON.parse(localStorage.getItem(ledgerKey))
+      ?? { last_run_id: 0, approvals: [], runs: [] };
+  } catch {
+    throw new Error("Browser storage is unavailable. Allow it for this site to save and review invoices.");
+  }
+}
+
 async function refreshWorkspace() {
   const response = await fetch(endpoint);
   if (!response.ok) throw new Error(await errorMessage(response));
   const payload = await response.json();
-  state.runs = payload.runs;
+  state.browserLedger = payload.browser_ledger;
+  if (state.browserLedger && !navigator.locks) {
+    throw new Error("Use a current browser over HTTPS to save invoice runs.");
+  }
+  state.runs = state.browserLedger ? browserLedger().runs : payload.runs;
   state.demos = payload.demos;
   state.ready = true;
   const connection = $("#connection");
@@ -185,13 +202,13 @@ async function readEvents(response) {
   if (!response.body) throw new Error("The server did not return a run.");
   const reader = response.body.pipeThrough(new TextDecoderStream()).getReader();
   let pending = "";
-  let outcome;
+  let result;
   function handle(line) {
     if (!line.trim()) return;
     const event = JSON.parse(line);
     if (event.error) throw new Error(event.error);
     if (event.stage) setStage(event.stage, event.detail);
-    if (event.outcome) outcome = event.outcome;
+    if (event.outcome) result = event;
   }
   try {
     while (true) {
@@ -206,8 +223,40 @@ async function readEvents(response) {
   } finally {
     await reader.cancel().catch(() => {});
   }
-  if (!outcome) throw new Error("The run ended without a decision. Refresh Run history before retrying.");
-  return outcome;
+  if (!result) throw new Error("The run ended without a decision. Refresh Run history before retrying.");
+  return result;
+}
+
+async function requestDecision(payload) {
+  const response = await fetch(endpoint, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+  });
+  return readEvents(response);
+}
+
+async function recordDecision(payload) {
+  if (!state.browserLedger) return (await requestDecision(payload)).outcome;
+
+  return navigator.locks.request(ledgerKey, async () => {
+    const { last_run_id, approvals, runs } = browserLedger();
+    if (approvals.length >= 1000) throw new Error("This demo workspace has reached its approval limit.");
+    const { outcome, approval } = await requestDecision({ ...payload, ledger: { last_run_id, approvals } });
+    const updatedRuns = [
+      { run_id: outcome.run_id, created: new Date().toISOString(), filename: payload.filename, outcome }, ...runs,
+    ].slice(0, 100);
+    try {
+      localStorage.setItem(ledgerKey, JSON.stringify({
+        last_run_id: outcome.run_id, approvals: approval ? [...approvals, approval] : approvals, runs: updatedRuns,
+      }));
+    } catch {
+      throw new Error("The run could not be saved. Check that this site has available browser storage.");
+    }
+    state.runs = updatedRuns;
+    renderHistory();
+    return outcome;
+  });
 }
 
 async function runInvoice(getFile) {
@@ -223,17 +272,14 @@ async function runInvoice(getFile) {
     selectFile(file);
     const { readPdf } = await import("./pdf.js");
     const pages = await readPdf(file, (detail) => setStage("extract", detail));
-    const response = await fetch(endpoint, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ filename: file.name.slice(0, 150), pages, use_ai: $("#ai-toggle").checked }),
-    });
-    const outcome = await readEvents(response);
+    const outcome = await recordDecision({ filename: file.name.slice(0, 150), pages, use_ai: $("#ai-toggle").checked });
     state.finished = true;
     $("#pipeline-status").textContent = "Complete";
     drawSteps();
     renderResult($("#result"), outcome, outcome.run_id);
-    await refreshWorkspace().catch(() => showError("The decision was recorded. Reload to refresh Run history."));
+    if (!state.browserLedger) {
+      await refreshWorkspace().catch(() => showError("The decision was recorded. Reload to refresh Run history."));
+    }
   } catch (error) {
     $("#pipeline-status").textContent = "Run interrupted";
     showError(error.message || "The invoice could not be processed.");
@@ -242,6 +288,13 @@ async function runInvoice(getFile) {
     renderControls();
   }
 }
+
+window.addEventListener("storage", ({ key }) => {
+  if (state.browserLedger && (key === ledgerKey || key === null)) {
+    state.runs = browserLedger().runs;
+    renderHistory();
+  }
+});
 
 $("#nav-run").addEventListener("click", () => showView("run"));
 $("#nav-history").addEventListener("click", () => showView("history"));
