@@ -35,11 +35,12 @@ def _evidence(outcome):
     )
     discrepancies = [
         {field: line[field] for field in line_fields}
-        for line in outcome["lines"] if line["Check"] != "Matched"
+        for line in outcome["lines"] if not line["passed"]
     ]
     return {
         "review_reasons": reasons,
         "po_candidates": outcome["candidates"][:5],
+        "po_price_variance": outcome.get("variance"),
         "total_line_discrepancies": len(discrepancies),
         "line_discrepancies": discrepancies[:10],
     }

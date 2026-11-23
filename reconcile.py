@@ -1,19 +1,22 @@
-"""Apply purchase order and invoice rules and retain an audit trail."""
+"""Resolve a purchase order and record the decision in one transaction."""
+
 from collections import defaultdict
-from contextlib import closing
 import csv
 from decimal import Decimal
 import json
 from pathlib import Path
 import re
-import sqlite3
 
 from rapidfuzz import fuzz
 
-ROOT = Path(__file__).resolve().parent
-PO_CSV = ROOT / "data" / "purchase_orders.csv"
-HISTORY = ROOT / "data" / "runs.sqlite3"
+from ledger import open_ledger
+
+
+PO_CSV = Path(__file__).resolve().parent / "data" / "purchase_orders.csv"
 CENT = Decimal("0.01")
+UNIT_RATE = Decimal("0.01")
+UNIT_CAP = Decimal("0.50")
+PO_CAP = Decimal("1.00")
 
 
 def normalize(text):
@@ -32,30 +35,40 @@ def load_orders():
     return orders
 
 
+def same_supplier(invoice, order):
+    return normalize(order["vendor"]) == normalize(invoice.vendor) and order["currency"] == invoice.currency
+
+
 def suggest_orders(invoice, orders, used_by_po):
-    invoice_skus = {reference(line.sku) for line in invoice.lines if line.sku}
+    skus = {reference(line.sku) for line in invoice.lines if line.sku}
+    descriptions = {normalize(line.description) for line in invoice.lines if not line.sku and line.description}
     candidates = []
     for po, lines in orders.items():
-        if normalize(lines[0]["vendor"]) != normalize(invoice.vendor) or lines[0]["currency"] != invoice.currency:
+        if not same_supplier(invoice, lines[0]):
             continue
         if all(used_by_po[po][line["sku"]] >= Decimal(line["quantity"]) for line in lines):
             continue
-        po_skus = {reference(line["sku"]) for line in lines}
-        overlap = len(po_skus & invoice_skus)
+        overlap = len({reference(line["sku"]) for line in lines} & skus)
+        description_matches = len({normalize(line["description"]) for line in lines} & descriptions)
         similarity = fuzz.ratio(reference(invoice.po), reference(po)) if invoice.po else 0
-        if overlap or similarity >= 75:
+        if overlap or description_matches or similarity >= 75:
             candidates.append({
                 "PO": po,
                 "Reference similarity": round(similarity) if invoice.po else None,
                 "Matching SKUs": overlap,
+                "Matching descriptions": description_matches,
             })
-    candidates.sort(key=lambda row: (row["Matching SKUs"], row["Reference similarity"] or 0), reverse=True)
-    return candidates
+    return sorted(candidates, key=_candidate_score, reverse=True)
+
+
+def _candidate_score(candidate):
+    return (candidate["Matching SKUs"], candidate["Matching descriptions"], candidate["Reference similarity"] or 0)
 
 
 def compare_lines(invoice, order_lines, used):
     results = []
     consumed = defaultdict(Decimal)
+    variance = Decimal("0")
     for line in invoice.lines:
         matches = [
             po_line for po_line in order_lines
@@ -64,8 +77,7 @@ def compare_lines(invoice, order_lines, used):
         ]
         issues = []
         sku = ""
-        remaining = None
-        po_price = None
+        before = after = po_price = difference = None
         if abs(line.quantity * line.unit_price - line.total) > CENT:
             issues.append("Quantity × price differs from line total")
         if line.quantity <= 0 or line.unit_price < 0 or line.total < 0:
@@ -75,140 +87,150 @@ def compare_lines(invoice, order_lines, used):
         else:
             po_line = matches[0]
             sku = po_line["sku"]
-            remaining = Decimal(po_line["quantity"]) - used[sku] - consumed[sku]
+            before = Decimal(po_line["quantity"]) - used[sku] - consumed[sku]
+            after = before - line.quantity
             po_price = Decimal(po_line["unit_price"])
-            if line.quantity > remaining:
+            difference = abs(line.quantity * (line.unit_price - po_price))
+            variance += difference
+            if after < 0:
                 issues.append("Quantity exceeds remaining PO quantity")
-            if line.unit_price != po_price:
-                issues.append("Unit price differs from PO")
+            if abs(line.unit_price - po_price) > min(po_price * UNIT_RATE, UNIT_CAP):
+                issues.append("Unit price outside tolerance")
             consumed[sku] += line.quantity
         results.append({
             "Invoice item": line.description,
             "Invoice SKU": line.sku,
             "PO SKU": sku,
             "Invoice qty": str(line.quantity),
-            "PO qty remaining": str(remaining) if remaining is not None else "",
+            "Previously approved": str(used[sku]) if sku else "",
+            "PO qty remaining": str(before) if before is not None else "",
+            "If approved": str(after) if after is not None else "",
             "Invoice unit price": str(line.unit_price),
             "PO unit price": str(po_price) if po_price is not None else "",
+            "Price variance": str(difference) if difference is not None else "",
             "Invoice line total": str(line.total),
-            "Check": "; ".join(issues) if issues else "Matched",
+            "Check": "; ".join(issues) if issues else "Within price tolerance" if difference else "Matched",
+            "passed": not issues,
         })
-    return results, consumed
+    return results, consumed, variance
 
 
-def _connect(db_path):
-    connection = sqlite3.connect(HISTORY if db_path is None else db_path)
-    connection.execute("""
-        CREATE TABLE IF NOT EXISTS runs (
-            id INTEGER PRIMARY KEY, created TEXT DEFAULT CURRENT_TIMESTAMP,
-            filename TEXT NOT NULL, vendor TEXT NOT NULL, invoice TEXT NOT NULL,
-            po TEXT, status TEXT NOT NULL, outcome TEXT NOT NULL, quantities TEXT NOT NULL
-        )
-    """)
-    return connection
+def history(*, scope="", database_url=None, db_path=None):
+    with open_ledger(scope=scope, database_url=database_url, db_path=db_path) as ledger:
+        return [
+            {"run_id": run_id, "created": str(created), "filename": filename, "outcome": json.loads(outcome)}
+            for run_id, created, filename, outcome in ledger.execute("""
+                SELECT id, created, filename, outcome FROM ap_runs WHERE scope = ?
+                ORDER BY id DESC LIMIT 100
+            """, (scope,))
+        ]
 
 
-def history(*, db_path=None):
-    with closing(_connect(db_path)) as connection:
-        return connection.execute("""
-            SELECT id, created, filename, status, outcome FROM runs ORDER BY id DESC LIMIT 100
-        """).fetchall()
-
-
-def record_extraction_failure(filename, reason, *, db_path=None):
-    outcome = {
-        "status": "Needs review", "vendor": "", "invoice": "", "po": "", "currency": "",
-        "total": None, "date": "", "reference": "", "reasons": [reason], "candidates": [], "lines": [], "sources": [],
-    }
-    with closing(_connect(db_path)) as connection, connection:
-        _save(connection, filename, outcome, {})
-    return outcome
-
-
-def _save(connection, filename, outcome, quantities):
-    cursor = connection.execute("""
-        INSERT INTO runs (filename, vendor, invoice, po, status, outcome, quantities)
-        VALUES (?, ?, ?, ?, ?, ?, ?)
-    """, (filename, normalize(outcome["vendor"]), outcome["invoice"].strip().upper(),
-          outcome["po"], outcome["status"], json.dumps(outcome), json.dumps(quantities)))
-    return cursor.lastrowid
-
-
-def save_review_advice(outcome, advice, *, db_path=None):
+def save_review_advice(outcome, advice, *, scope="", database_url=None, db_path=None):
     annotated = {**outcome, "review_advice": advice}
-    with closing(_connect(db_path)) as connection, connection:
-        connection.execute(
-            "UPDATE runs SET outcome = ? WHERE id = ? AND status = 'Needs review'",
-            (json.dumps(annotated), outcome["run_id"]),
-        )
+    with open_ledger(scope=scope, database_url=database_url, db_path=db_path) as ledger:
+        ledger.execute("""
+            UPDATE ap_runs SET outcome = ? WHERE scope = ? AND id = ? AND status = 'Needs review'
+        """, (json.dumps(annotated), scope, outcome["run_id"]))
     return annotated
 
 
-def reconcile(invoice, filename, stage=lambda _: None, *, db_path=None):
-    stage("Match purchase order")
-    orders = load_orders()
-    order_po = next((po for po in orders if reference(po) == reference(invoice.po)), "")
-    exact = bool(order_po)
+def validate(invoice):
     reasons = list(invoice.issues)
-    candidates = []
-    authorized_vendor = any(normalize(lines[0]["vendor"]) == normalize(invoice.vendor) for lines in orders.values())
-    if not authorized_vendor:
+    line_sum = sum((line.total for line in invoice.lines), Decimal("0"))
+    calculated_sum = sum((line.quantity * line.unit_price for line in invoice.lines), Decimal("0"))
+    if abs(calculated_sum - line_sum) > CENT:
+        reasons.append("The combined line amounts differ from quantity multiplied by unit price.")
+    if invoice.subtotal is not None and abs(invoice.subtotal - line_sum) > CENT:
+        reasons.append("The line items do not reconcile to the invoice subtotal.")
+    if invoice.total is not None and (invoice.total < 0 or abs(line_sum + invoice.tax - invoice.total) > CENT):
+        reasons.append("The line items and tax do not reconcile to a valid invoice total.")
+    if invoice.tax < 0:
+        reasons.append("Negative tax requires manual review.")
+    return reasons
+
+
+def _match(invoice, orders, used_by_po):
+    exact = [po for po in orders if reference(po) == reference(invoice.po)]
+    if len(exact) == 1:
+        po = exact[0]
+        if same_supplier(invoice, orders[po][0]):
+            return po, "Exact reference", [], None
+        return "", "Vendor or currency conflict", [], "The referenced PO belongs to a different vendor or currency."
+
+    candidates = suggest_orders(invoice, orders, used_by_po)
+    if candidates:
+        tied = len(candidates) > 1 and _candidate_score(candidates[0]) == _candidate_score(candidates[1])
+        method = "Fuzzy reference and item evidence" if invoice.po else "Item evidence"
+        reason = ("Multiple open POs have equally strong evidence. Confirm which PO applies." if tied else
+                  "Confirm the suggested PO. The invoice did not identify a unique exact match.")
+        return "" if tied else candidates[0]["PO"], method, candidates, reason
+    return "", "No candidate", [], "No matching open PO was found in the approved dataset."
+
+
+def reconcile(invoice, filename, stage=lambda _: None, *, scope="", database_url=None, db_path=None):
+    stage("validate", "Checking required fields and invoice arithmetic")
+    reasons = validate(invoice)
+    orders = load_orders()
+    if not any(normalize(lines[0]["vendor"]) == normalize(invoice.vendor) for lines in orders.values()):
         reasons.append("Vendor is outside the approved PO dataset.")
-    with closing(_connect(db_path)) as connection, connection:
-        connection.execute("BEGIN IMMEDIATE")
+
+    with open_ledger(scope=scope, database_url=database_url, db_path=db_path, write=True) as ledger:
+        stage("match", "Trying the exact reference, then comparing open purchase orders")
         used_by_po = defaultdict(lambda: defaultdict(Decimal))
-        for po, quantities in connection.execute(
-            "SELECT po, quantities FROM runs WHERE status = 'Approved'"
+        po_variances = defaultdict(Decimal)
+        for po, quantities, variance in ledger.execute(
+            "SELECT po, quantities, variance FROM ap_runs WHERE scope = ? AND status = 'Approved'", (scope,)
         ):
             for sku, quantity in json.loads(quantities).items():
                 used_by_po[po][sku] += Decimal(quantity)
-        if exact:
-            order = orders[order_po][0]
-            if normalize(order["vendor"]) != normalize(invoice.vendor) or order["currency"] != invoice.currency:
-                reasons.append("The referenced PO belongs to a different vendor or currency.")
-                order_po = ""
-        else:
-            candidates = suggest_orders(invoice, orders, used_by_po)
-            if candidates:
-                scores = ("Matching SKUs", "Reference similarity")
-                top = candidates[0]
-                tied = len(candidates) > 1 and all(top[key] == candidates[1][key] for key in scores)
-                if not tied:
-                    order_po = top["PO"]
-                reasons.append("Confirm the intended PO. The invoice reference is missing or did not match exactly.")
-            else:
-                reasons.append("No matching open PO was found in the demo dataset.")
+            po_variances[po] += Decimal(variance)
+        order_po, match_method, candidates, match_issue = _match(invoice, orders, used_by_po)
+        if match_issue:
+            reasons.append(match_issue)
 
-        stage("Check duplicates and reconcile line items")
-        duplicate = connection.execute("""
-            SELECT id FROM runs WHERE vendor = ? AND invoice = ? AND status = 'Approved'
-        """, (normalize(invoice.vendor), invoice.number.strip().upper())).fetchone()
-        lines, consumed = compare_lines(invoice, orders.get(order_po, []), used_by_po[order_po])
-        for candidate in candidates[:5]:
-            candidate_po = candidate["PO"]
-            candidate_lines = lines if candidate_po == order_po else compare_lines(
-                invoice, orders[candidate_po], used_by_po[candidate_po]
-            )[0]
-            candidate["Lines passing every check"] = sum(line["Check"] == "Matched" for line in candidate_lines)
-        if any(row["Check"] != "Matched" for row in lines):
-            reasons.append("Review the line-item differences below.")
-        line_sum = sum((line.total for line in invoice.lines), Decimal("0"))
-        if invoice.subtotal is not None and abs(invoice.subtotal - line_sum) > CENT:
-            reasons.append("The line items do not reconcile to the invoice subtotal.")
-        if invoice.total is not None and abs(line_sum + invoice.tax - invoice.total) > CENT:
-            reasons.append("The line items and tax do not reconcile to the invoice total.")
+        stage("reconcile", "Checking prior approvals, quantities, prices and the PO tolerance budget")
+        invoice_key = invoice.number.strip().upper()
+        vendor_key = normalize(invoice.vendor)
+        duplicate = ledger.execute("""
+            SELECT id FROM ap_runs WHERE scope = ? AND vendor = ? AND invoice = ? AND status = 'Approved'
+        """, (scope, vendor_key, invoice_key)).fetchone()
+        lines, consumed, variance = [], {}, Decimal("0")
         if duplicate:
-            reasons.insert(0, f"Invoice already approved in run #{duplicate[0]}.")
+            reasons = [f"Invoice already approved in run #{duplicate[0]}. No PO quantities were consumed."]
+        else:
+            lines, consumed, variance = compare_lines(invoice, orders.get(order_po, []), used_by_po[order_po])
+            for candidate in candidates[:5]:
+                candidate_po = candidate["PO"]
+                candidate_lines = lines if candidate_po == order_po else compare_lines(
+                    invoice, orders[candidate_po], used_by_po[candidate_po]
+                )[0]
+                candidate["Lines passing every check"] = sum(line["passed"] for line in candidate_lines)
+            if any(not row["passed"] for row in lines):
+                reasons.append("One or more line items failed reconciliation. See the line-item checks.")
+            if order_po and variance + po_variances[order_po] > PO_CAP:
+                reasons.append("The cumulative absolute price variance would exceed the PO's 1.00 allowance.")
+
         status = "Duplicate" if duplicate else "Needs review" if reasons else "Approved"
+        if status == "Approved":
+            reasons = ["Exact PO and vendor match. Required data, invoice arithmetic and quantities passed."]
+            if variance:
+                reasons.append(f"Small price variance ({variance:.2f} {invoice.currency}) is within the unit and cumulative PO limits.")
+            if any(used_by_po[order_po].values()):
+                reasons.append("Prior approved invoices were deducted before checking this split invoice.")
+
         outcome = {
             "status": status, "vendor": invoice.vendor, "invoice": invoice.number, "po": order_po,
             "total": str(invoice.total) if invoice.total is not None else None, "date": invoice.date,
             "currency": invoice.currency, "reference": invoice.po, "sources": invoice.sources, "lines": lines,
-            "candidates": candidates, "reasons": reasons or [
-                "Exact PO, approved vendor and currency, available quantities, and matching prices and totals."
-            ],
+            "match_method": match_method, "candidates": candidates[:5], "reasons": reasons,
+            "variance": {"current": str(variance), "used": str(po_variances[order_po]), "cap": str(PO_CAP)} if order_po else None,
         }
-        stage("Record decision")
+        stage("decision", "Recording the decision and any approved quantity changes")
         quantities = {sku: str(quantity) for sku, quantity in consumed.items()} if status == "Approved" else {}
-        outcome["run_id"] = _save(connection, filename, outcome, quantities)
+        outcome["run_id"] = ledger.execute("""
+            INSERT INTO ap_runs (scope, filename, vendor, invoice, po, status, outcome, quantities, variance)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING id
+        """, (scope, filename, vendor_key, invoice_key, order_po, status, json.dumps(outcome),
+              json.dumps(quantities), str(variance) if status == "Approved" else "0")).fetchone()[0]
     return outcome

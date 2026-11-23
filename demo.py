@@ -7,11 +7,12 @@ import pymupdf
 SAMPLES = {
     "01-readable-match.pdf": ("NS-1001", "PO-1023", 5, 4, False),
     "02-scanned-mistyped-po.pdf": ("NS-1002", "PO-1032", 1, 1, True),
-    "03-line-quantity-mismatch.pdf": ("NS-1003", "PO-1023", 11, 1, False),
+    "03-split-with-price-variance.pdf": ("NS-1003", "PO-1023", 2, 1, False, Decimal("50.20")),
+    "04-quantity-exceeds-balance.pdf": ("NS-1004", "PO-1023", 4, 1, False),
 }
 
 
-def make_invoice(number, po, paper, toner, scanned):
+def make_invoice(number, po, paper, toner, scanned, paper_price=Decimal("50.00")):
     with pymupdf.open() as document:
         page = document.new_page(width=612, height=792)
         page.insert_text((48, 65), "INVOICE", fontsize=28)
@@ -26,9 +27,11 @@ def make_invoice(number, po, paper, toner, scanned):
         page.draw_line((48, 230), (570, 230))
         subtotal = Decimal("0")
         for y, sku, label, quantity, price in (
-            (255, "PPR-01", "Copy paper case", paper, Decimal("50.00")),
+            (255, "PPR-01", "Copy paper case", paper, paper_price),
             (282, "TNR-02", "Black toner cartridge", toner, Decimal("100.00")),
         ):
+            if not quantity:
+                continue
             amount = quantity * price
             subtotal += amount
             for x, value in zip(columns, (sku, label, str(quantity), f"{price:.2f}", f"{amount:.2f}")):

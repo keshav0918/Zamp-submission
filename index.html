@@ -1,0 +1,70 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="theme-color" content="#172a23">
+    <meta name="description" content="Extract invoices, match purchase orders, and review the evidence behind each decision.">
+    <link rel="icon" href="data:,">
+    <title>Invoice Review</title>
+  </head>
+  <body>
+    <header class="topbar">
+      <div class="shell topbar-inner">
+        <div class="brand"><span class="brand-mark" aria-hidden="true">IR</span><span>Invoice Review</span></div>
+        <nav aria-label="Workspace">
+          <button id="nav-run" class="nav-button active" aria-current="page" type="button">New run</button>
+          <button id="nav-history" class="nav-button" type="button">Run history <span id="history-count" class="count">0</span></button>
+        </nav>
+      </div>
+    </header>
+
+    <main class="shell">
+      <section id="run-view" aria-labelledby="run-title">
+        <div class="heading">
+          <div><p class="eyebrow">ACCOUNTS PAYABLE</p><h1 id="run-title">Invoice review</h1><p>Match an invoice to its purchase order and see the evidence behind the decision.</p></div>
+          <span class="connection" id="connection" role="status"><i></i> Connecting to ledger</span>
+        </div>
+        <div class="work-grid">
+          <section class="card intake" aria-labelledby="intake-title">
+            <div class="card-header"><h2 id="intake-title">Source document</h2><span>PDF</span></div>
+            <form id="run-form">
+              <input type="file" id="file-input" accept=".pdf,application/pdf" class="visually-hidden">
+              <label for="file-input" id="dropzone" class="dropzone">
+                <span class="upload-symbol" aria-hidden="true">↑</span>
+                <strong id="file-label">Drop an invoice here or browse</strong>
+                <span id="file-help">Readable or scanned PDF · Up to 20 MB and 10 pages</span>
+              </label>
+              <label id="ai-control" class="ai-control" hidden>
+                <input type="checkbox" id="ai-toggle">
+                <span><strong>Generate AI review guidance</strong><small>Send reconciliation evidence for exceptions to the configured provider.</small></span>
+              </label>
+              <button id="run-button" type="submit" class="primary" disabled>Review invoice <span aria-hidden="true">→</span></button>
+              <p id="run-error" class="error" role="alert" hidden></p>
+            </form>
+            <div class="samples">
+              <h3>Try a sample</h3>
+              <p class="meta">Run the samples in order to see how approvals change the PO balance.</p>
+              <div id="sample-list"></div>
+            </div>
+          </section>
+          <section class="card pipeline" aria-labelledby="pipeline-title">
+            <div class="card-header"><h2 id="pipeline-title">Live pipeline</h2><span id="pipeline-status" class="pipeline-status">Waiting for invoice</span></div>
+            <ol id="steps" aria-live="polite"></ol>
+          </section>
+        </div>
+        <section id="result" class="result" aria-live="polite" hidden></section>
+      </section>
+
+      <section id="history-view" aria-labelledby="history-title" hidden>
+        <div class="heading">
+          <div><p class="eyebrow">ACCOUNTS PAYABLE</p><h1 id="history-title">Run history</h1><p>Revisit decisions and their original supporting checks.</p></div>
+          <button id="history-new" class="primary" type="button">New review <span aria-hidden="true">→</span></button>
+        </div>
+        <div id="history-list"></div>
+        <section id="history-result" class="result" hidden></section>
+      </section>
+    </main>
+    <script type="module" src="/src/main.js"></script>
+  </body>
+</html>
