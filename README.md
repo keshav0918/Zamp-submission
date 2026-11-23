@@ -1,14 +1,17 @@
 # Invoice Review · PS-1
 
-A Vite browser app and Python API for matching vendor invoices to purchase orders with SQLite. Upload a readable or scanned PDF, follow the live pipeline, and open the decision with its line-item evidence and audit history.
+A Vite browser app and Python API for matching vendor invoices to purchase orders. Upload a readable or scanned PDF, follow the live pipeline, and open the decision with its line-item evidence and audit history.
 
 ## Deploy on Vercel
 
 1. Import [keshav0918/Zamp-submission](https://github.com/keshav0918/Zamp-submission) from GitHub in the [Vercel dashboard](https://vercel.com/new). Select branch `main` and keep the Vite framework and repository root.
-2. Click **Deploy**. The core app requires no environment variables or database integration.
-3. Open the production URL in a private browser window, wait for **Ledger connected**, and run the four built-in samples in order. Ensure deployment protection allows external reviewers to view the production URL.
+2. For a hosted database, create a project in [Supabase](https://supabase.com/dashboard). In **Connect**, copy the **Transaction pooler** connection string (port 6543). Substitute your database password and use TLS (`sslmode=require`). Keep the connection string private. [Supabase connection guide](https://supabase.com/docs/guides/database/connecting-to-postgres)
+3. In Vercel **Project Settings → Environment Variables**, add the connection string as `DATABASE_URL` for **Production**, mark it sensitive, and deploy or redeploy. The first request creates the ledger in the private `invoice_review` schema. The connection role needs permission to create that schema and its tables.
+4. Open the production URL in a private browser window, wait for **PostgreSQL connected**, and run the four built-in samples in order. Ensure deployment protection allows external reviewers to view the production URL.
 
-Vercel runs each reconciliation in an in-memory SQLite transaction. The browser stores its approvals and latest 100 decisions and supplies the approvals to the API on each run. This keeps split-invoice balances and duplicate checks working across reloads and tabs, without relying on Vercel's temporary filesystem. The ledger is a per-browser demo workspace. A new browser or cleared site data starts fresh. The server receives extracted words, coordinates and prior approvals. The original PDF stays in the browser.
+With `DATABASE_URL` set, PostgreSQL stores invoice decisions, approval balances, and duplicate checks. Run history stays scoped to the browser workspace cookie and selected PO catalog. A different browser starts a separate workspace. Existing browser-only history is not copied into PostgreSQL. The server receives extracted words and coordinates. The original PDF stays in the browser.
+
+Without `DATABASE_URL`, the demo runs each reconciliation in memory using SQLite and saves its ledger in the browser. The status reads **Ledger connected** in that mode.
 
 ## Run locally
 
@@ -26,7 +29,7 @@ npm ci
 npm run dev
 ```
 
-Open the URL printed by Vite. The app uses the same per-browser ledger as Vercel by default. To keep a local SQLite file, start Uvicorn with `INVOICE_DB_PATH=data/web-runs.sqlite3`. Vite bundles the browser OCR worker and English model from locked npm packages. The browser loads them the first time it reads a scan.
+Open the URL printed by Vite. Set `DATABASE_URL` before starting Uvicorn to use PostgreSQL. The default is the browser demo. To use a local SQLite file, start Uvicorn with `INVOICE_DB_PATH=data/web-runs.sqlite3`. Vite bundles the browser OCR worker and English model from locked npm packages. The browser loads them the first time it reads a scan.
 
 ## Live demo
 
@@ -62,7 +65,7 @@ The three downloads include the demo purchase orders, so you can upload any of t
 2. Required invoice fields, ISO dates, currency codes, line arithmetic, subtotal, tax and total are validated. Arithmetic allows one cent for rounding.
 3. Exact PO references require the matching vendor and currency. For missing or mistyped references, open POs from that vendor and currency are ranked by SKU overlap, description matches and reference similarity. Fuzzy suggestions and tied candidates need human confirmation.
 4. Each line matches by SKU, with exact normalized description as a fallback for missing SKUs. The allowed quantity is the ordered quantity minus prior approvals and quantities already assigned on this invoice.
-5. Unit prices may differ by up to 1% of the PO unit price or 0.50 in the invoice currency, whichever is smaller. Absolute variances across all approvals on the PO are capped at 1.00. Overages and discrepancies go to review. Only approvals consume quantity and variance. Browser tabs serialize runs before reading and saving the ledger. Local file mode uses a SQLite write transaction and duplicate constraint.
+5. Unit prices may differ by up to 1% of the PO unit price or 0.50 in the invoice currency, whichever is smaller. Absolute variances across all approvals on the PO are capped at 1.00. Overages and discrepancies go to review. Only approvals consume quantity and variance. PostgreSQL serializes approval writes for each workspace and PO catalog, with a database constraint protecting against duplicates.
 
 ## Optional LLM inference
 

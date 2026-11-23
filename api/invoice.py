@@ -91,12 +91,16 @@ def private_response(response, request, scope):
     response.headers["Cache-Control"] = "private, no-store"
     if scope:
         response.set_cookie(COOKIE, scope, max_age=30 * 24 * 3600, httponly=True, samesite="lax",
-                            secure=request.url.scheme == "https")
+                            secure=bool(os.environ.get("VERCEL")) or request.url.scheme == "https")
     return response
 
 
-def local_database():
-    return None if os.environ.get("VERCEL") else os.environ.get("INVOICE_DB_PATH")
+def database_settings():
+    if database_url := os.environ.get("DATABASE_URL"):
+        return {"database_url": database_url}
+    if not os.environ.get("VERCEL") and (db_path := os.environ.get("INVOICE_DB_PATH")):
+        return {"db_path": db_path}
+    return {}
 
 
 def ledger_scope(workspace_id, catalog_id):
@@ -127,19 +131,20 @@ def get_workspace(request: Request, demo: str | None = None, catalog_id: str = "
             raise HTTPException(404, "Demo invoice does not exist.")
         return Response(make_invoice(*SAMPLES[demo]), media_type="application/pdf",
                         headers={"Cache-Control": "public, max-age=3600"})
-    db_path = local_database()
+    database = database_settings()
     if catalog_id != "demo" and (len(catalog_id) != 64 or any(char not in "0123456789abcdef" for char in catalog_id)):
         raise HTTPException(422, "Invalid PO catalog ID.")
-    scope = workspace(request) if db_path else None
+    scope = workspace(request) if database else None
     try:
-        runs = history(scope=ledger_scope(scope, catalog_id), db_path=db_path) if db_path else []
+        runs = history(scope=ledger_scope(scope, catalog_id), **database) if database else []
         default_id, orders = load_catalog()
     except Exception:
         log.exception("Could not load invoice history")
         raise HTTPException(503, "The invoice ledger is unavailable.") from None
     return private_response(JSONResponse({
         "runs": runs, "ai_enabled": all(inference_settings().values()),
-        "demos": list(SAMPLES), "storage": "SQLite", "browser_ledger": not db_path,
+        "demos": list(SAMPLES), "storage": "PostgreSQL" if "database_url" in database else "SQLite",
+        "browser_ledger": not database,
         "default_catalog": catalog_details(default_id, orders),
     }), request, scope)
 
@@ -153,10 +158,10 @@ def run_invoice(payload: RunRequest | CatalogRequest, request: Request):
     catalog_id, orders = uploaded_catalog(payload.catalog_csv)
     if catalog_id != payload.catalog_id:
         raise HTTPException(422, "The PO CSV changed. Upload it again before running the invoice.")
-    db_path = local_database()
-    scope = workspace(request) if db_path else None
-    storage_scope = ledger_scope(scope, catalog_id) if db_path else None
-    if not db_path and payload.ledger is None:
+    database = database_settings()
+    scope = workspace(request) if database else None
+    storage_scope = ledger_scope(scope, catalog_id) if database else None
+    if not database and payload.ledger is None:
         raise HTTPException(422, "Browser history is missing. Reload the app and try again.")
     ai = inference_settings()
 
@@ -170,8 +175,8 @@ def run_invoice(payload: RunRequest | CatalogRequest, request: Request):
             try:
                 emit("extract", "Reading vendor, invoice number, totals and line items from the PDF")
                 invoice = extract_pages([page.model_dump() for page in payload.pages])
-                if db_path:
-                    outcome = reconcile(invoice, payload.filename, emit, scope=storage_scope, db_path=db_path, orders=orders)
+                if database:
+                    outcome = reconcile(invoice, payload.filename, emit, scope=storage_scope, orders=orders, **database)
                 else:
                     outcome = reconcile(
                         invoice, payload.filename, emit,
@@ -184,8 +189,8 @@ def run_invoice(payload: RunRequest | CatalogRequest, request: Request):
                     emit("advice", "Generating optional guidance from the reconciliation evidence")
                     try:
                         advice = infer_review(outcome, **ai)
-                        if db_path:
-                            outcome = save_review_advice(outcome, advice, scope=storage_scope, db_path=db_path)
+                        if database:
+                            outcome = save_review_advice(outcome, advice, scope=storage_scope, **database)
                         else:
                             outcome["review_advice"] = advice
                     except InferenceUnavailable:

@@ -96,8 +96,8 @@ def compare_lines(invoice, order_lines, used):
     return results, consumed, variance
 
 
-def history(*, scope="", db_path=None):
-    with open_ledger(db_path=db_path) as ledger:
+def history(*, scope="", db_path=None, database_url=None):
+    with open_ledger(db_path=db_path, database_url=database_url, scope=scope) as ledger:
         return [
             {"run_id": run_id, "created": str(created), "filename": filename, "outcome": json.loads(outcome)}
             for run_id, created, filename, outcome in ledger.execute("""
@@ -107,9 +107,9 @@ def history(*, scope="", db_path=None):
         ]
 
 
-def save_review_advice(outcome, advice, *, scope="", db_path=None):
+def save_review_advice(outcome, advice, *, scope="", db_path=None, database_url=None):
     annotated = {**outcome, "review_advice": advice}
-    with open_ledger(db_path=db_path) as ledger:
+    with open_ledger(db_path=db_path, database_url=database_url, scope=scope) as ledger:
         ledger.execute("""
             UPDATE ap_runs SET outcome = ? WHERE scope = ? AND id = ? AND status = 'Needs review'
         """, (json.dumps(annotated), scope, outcome["run_id"]))
@@ -151,7 +151,7 @@ def _match(invoice, orders, used_by_po):
     return "", "No candidate", [], "No matching open PO was found in the approved dataset."
 
 
-def reconcile(invoice, filename, stage=lambda *_: None, *, scope="", db_path=None, approvals=None, run_id=None, orders=None):
+def reconcile(invoice, filename, stage=lambda *_: None, *, scope="", db_path=None, database_url=None, approvals=None, run_id=None, orders=None):
     stage("validate", "Checking required fields and invoice arithmetic")
     reasons = validate(invoice)
     if orders is None:
@@ -161,7 +161,7 @@ def reconcile(invoice, filename, stage=lambda *_: None, *, scope="", db_path=Non
 
     if approvals is not None:
         db_path = ":memory:"
-    with open_ledger(db_path=db_path, write=True) as ledger:
+    with open_ledger(db_path=db_path, database_url=database_url, scope=scope, write=True) as ledger:
         if approvals:
             ledger.executemany("""
                 INSERT INTO ap_runs (id, scope, filename, vendor, invoice, po, status, outcome, quantities, variance)
@@ -223,11 +223,16 @@ def reconcile(invoice, filename, stage=lambda *_: None, *, scope="", db_path=Non
         }
         stage("decision", "Recording the decision and any approved quantity changes")
         quantities = {sku: str(quantity) for sku, quantity in consumed.items()} if status == "Approved" else {}
-        outcome["run_id"] = ledger.execute("""
-            INSERT INTO ap_runs (id, scope, filename, vendor, invoice, po, status, outcome, quantities, variance)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?) RETURNING id
-        """, (run_id, scope, filename, vendor_key, invoice_key, order_po, status, json.dumps(outcome),
-              json.dumps(quantities), str(variance) if status == "Approved" else "0")).fetchone()[0]
+        columns = "scope, filename, vendor, invoice, po, status, outcome, quantities, variance"
+        values = (scope, filename, vendor_key, invoice_key, order_po, status, json.dumps(outcome),
+                  json.dumps(quantities), str(variance) if status == "Approved" else "0")
+        if run_id is not None:
+            columns = f"id, {columns}"
+            values = (run_id, *values)
+        placeholders = ", ".join("?" for _ in values)
+        outcome["run_id"] = ledger.execute(
+            f"INSERT INTO ap_runs ({columns}) VALUES ({placeholders}) RETURNING id", values
+        ).fetchone()[0]
         if approvals is not None and status == "Approved":
             outcome["approval"] = {
                 "run_id": outcome["run_id"], "vendor": vendor_key, "invoice": invoice_key,

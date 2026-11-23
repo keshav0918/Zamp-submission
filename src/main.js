@@ -213,7 +213,8 @@ async function refreshWorkspace(catalog = state.catalog, remember = false) {
   state.ready = true;
   const connection = $("#connection");
   connection.dataset.state = "ok";
-  connection.innerHTML = "<i></i> Ledger connected";
+  connection.innerHTML = payload.storage === "PostgreSQL"
+    ? "<i></i> PostgreSQL connected" : "<i></i> Ledger connected";
   $("#ai-control").hidden = !payload.ai_enabled;
   const active = catalog ?? payload.default_catalog;
   $("#catalog-status").textContent = `${catalog?.name ?? "Built-in demo POs"} · ${active.count} purchase orders · ${active.rows} line items`;
