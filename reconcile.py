@@ -96,8 +96,8 @@ def compare_lines(invoice, order_lines, used):
     return results, consumed
 
 
-def _connect():
-    connection = sqlite3.connect(HISTORY)
+def _connect(db_path):
+    connection = sqlite3.connect(HISTORY if db_path is None else db_path)
     connection.execute("""
         CREATE TABLE IF NOT EXISTS runs (
             id INTEGER PRIMARY KEY, created TEXT DEFAULT CURRENT_TIMESTAMP,
@@ -108,19 +108,19 @@ def _connect():
     return connection
 
 
-def history():
-    with closing(_connect()) as connection:
+def history(*, db_path=None):
+    with closing(_connect(db_path)) as connection:
         return connection.execute("""
             SELECT id, created, filename, status, outcome FROM runs ORDER BY id DESC LIMIT 100
         """).fetchall()
 
 
-def record_extraction_failure(filename, reason):
+def record_extraction_failure(filename, reason, *, db_path=None):
     outcome = {
         "status": "Needs review", "vendor": "", "invoice": "", "po": "", "currency": "",
         "total": None, "date": "", "reference": "", "reasons": [reason], "candidates": [], "lines": [], "sources": [],
     }
-    with closing(_connect()) as connection, connection:
+    with closing(_connect(db_path)) as connection, connection:
         _save(connection, filename, outcome, {})
     return outcome
 
@@ -134,9 +134,9 @@ def _save(connection, filename, outcome, quantities):
     return cursor.lastrowid
 
 
-def save_review_advice(outcome, advice):
+def save_review_advice(outcome, advice, *, db_path=None):
     annotated = {**outcome, "review_advice": advice}
-    with closing(_connect()) as connection, connection:
+    with closing(_connect(db_path)) as connection, connection:
         connection.execute(
             "UPDATE runs SET outcome = ? WHERE id = ? AND status = 'Needs review'",
             (json.dumps(annotated), outcome["run_id"]),
@@ -144,7 +144,7 @@ def save_review_advice(outcome, advice):
     return annotated
 
 
-def reconcile(invoice, filename, stage=lambda _: None):
+def reconcile(invoice, filename, stage=lambda _: None, *, db_path=None):
     stage("Match purchase order")
     orders = load_orders()
     order_po = next((po for po in orders if reference(po) == reference(invoice.po)), "")
@@ -154,7 +154,7 @@ def reconcile(invoice, filename, stage=lambda _: None):
     authorized_vendor = any(normalize(lines[0]["vendor"]) == normalize(invoice.vendor) for lines in orders.values())
     if not authorized_vendor:
         reasons.append("Vendor is outside the approved PO dataset.")
-    with closing(_connect()) as connection, connection:
+    with closing(_connect(db_path)) as connection, connection:
         connection.execute("BEGIN IMMEDIATE")
         used_by_po = defaultdict(lambda: defaultdict(Decimal))
         for po, quantities in connection.execute(

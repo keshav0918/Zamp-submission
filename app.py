@@ -1,6 +1,8 @@
 """Streamlit interface for invoice-to-PO review."""
 import json
 import os
+from pathlib import Path
+from tempfile import TemporaryDirectory
 
 import pymupdf
 import pytesseract
@@ -68,6 +70,11 @@ def show_outcome(outcome):
 
 st.title("Invoice Review")
 run_tab, history_tab = st.tabs(["Live run", "Run history"])
+db_path = None
+if os.environ.get("INVOICE_SHARED_HISTORY") != "1":
+    if "history_directory" not in st.session_state:
+        st.session_state.history_directory = TemporaryDirectory(prefix="invoice-review-")
+    db_path = Path(st.session_state.history_directory.name) / "runs.sqlite3"
 
 with run_tab:
     upload = st.file_uploader("Upload an invoice PDF", type=["pdf"])
@@ -107,9 +114,9 @@ with run_tab:
         except (ValueError, pymupdf.FileDataError, pytesseract.TesseractError, RuntimeError, OSError) as error:
             live.warning("Extraction stopped · Review required")
             reason = str(error) if isinstance(error, ValueError) else "The PDF could not be read. Check the file or OCR installation."
-            st.session_state.outcome = record_extraction_failure(upload.name, reason)
+            st.session_state.outcome = record_extraction_failure(upload.name, reason, db_path=db_path)
         else:
-            outcome = reconcile(invoice, upload.name, show_stage)
+            outcome = reconcile(invoice, upload.name, show_stage, db_path=db_path)
             if outcome["status"] == "Needs review" and inference_ready and use_inference:
                 live.info("Decision recorded · Generating AI review guidance")
                 try:
@@ -117,7 +124,7 @@ with run_tab:
                 except InferenceUnavailable:
                     live.warning("Decision recorded · AI guidance unavailable. You can review the evidence below.")
                 else:
-                    outcome = save_review_advice(outcome, advice)
+                    outcome = save_review_advice(outcome, advice, db_path=db_path)
                     live.success("Run complete · AI review guidance added")
             else:
                 live.success("Run complete")
@@ -126,7 +133,7 @@ with run_tab:
         show_outcome(st.session_state.outcome)
 
 with history_tab:
-    runs = history()
+    runs = history(db_path=db_path)
     if runs:
         st.dataframe(
             [{"Run": run_id, "UTC": created, "File": filename, "Decision": status,

@@ -13,7 +13,13 @@ pip install -r requirements.txt
 streamlit run app.py
 ```
 
-For Streamlit Community Cloud, use `app.py` as the entry point. The repository's `requirements.txt` and `packages.txt` declare the Python and system dependencies. SQLite history is local to the running instance. Hosted restarts can reset it.
+## Deploy publicly
+
+1. Sign in to [Streamlit Community Cloud](https://share.streamlit.io/) with access to the GitHub repository.
+2. Select **Create app** and choose repository `keshav0918/Zamp-submission`, branch `main`, and main file path `app.py`. The repository already has the Python and Tesseract dependency files.
+3. Deploy and check the app's sharing settings so anyone with the link can view it. Open the resulting `.streamlit.app` URL in a private browser window and run the readable and scanned demo invoices.
+
+By default, each visitor uses a separate SQLite history for their browser session. Starting a new session resets the demo history and PO balances. For a trusted local installation, set `INVOICE_SHARED_HISTORY=1` to retain the shared history in `data/runs.sqlite3`. Leave that setting unset on a public deployment.
 
 ## Optional AI review guidance
 
