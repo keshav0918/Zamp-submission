@@ -26,7 +26,7 @@ npm ci
 npm run dev
 ```
 
-Open the URL printed by Vite. The app uses the same per-browser ledger as Vercel by default. To keep a local SQLite file, start Uvicorn with `INVOICE_DB_PATH=data/web-runs.sqlite3`. The browser OCR worker and English language model are copied from locked npm packages and served with the app.
+Open the URL printed by Vite. The app uses the same per-browser ledger as Vercel by default. To keep a local SQLite file, start Uvicorn with `INVOICE_DB_PATH=data/web-runs.sqlite3`. Vite bundles the browser OCR worker and English model from locked npm packages. The browser loads them the first time it reads a scan.
 
 ## Live demo
 

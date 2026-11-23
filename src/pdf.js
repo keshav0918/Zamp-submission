@@ -1,7 +1,61 @@
 import { getDocument, GlobalWorkerOptions, Util } from "pdfjs-dist";
 import pdfWorker from "pdfjs-dist/build/pdf.worker.min.mjs?url";
+import englishModel from "@tesseract.js-data/eng/4.0.0_best_int/eng.traineddata.gz?url";
+import ocrWorker from "tesseract.js/dist/worker.min.js?url";
+import ocrCore from "tesseract.js-core/tesseract-core-lstm.wasm.js?url";
 
 GlobalWorkerOptions.workerSrc = pdfWorker;
+
+const OCR_TIMEOUT = 30_000;
+
+async function startOcr() {
+  const { createWorker, OEM } = await import("tesseract.js");
+  let timer;
+  let expired = false;
+  try {
+    return await new Promise((resolve, reject) => {
+      const fail = (cause) => {
+        const message = String(cause).includes("eng.traineddata")
+          ? "The English OCR model could not download. Reload the page and try the scan again."
+          : "The OCR engine could not start. Reload the page and try again.";
+        reject(new Error(message));
+      };
+      timer = setTimeout(() => reject(new Error("The OCR engine took too long to start. Try the scan again.")), OCR_TIMEOUT);
+      createWorker("eng", OEM.LSTM_ONLY, {
+        workerPath: new URL(ocrWorker, location.href).href,
+        corePath: new URL(ocrCore, location.href).href,
+        langPath: new URL(".", new URL(englishModel, location.href)).href,
+        workerBlobURL: false,
+        cacheMethod: "none",
+        errorHandler: fail,
+      }).then((worker) => {
+        if (expired) void worker.terminate();
+        else resolve(worker);
+      }, fail);
+    });
+  } catch (error) {
+    expired = true;
+    throw error;
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+async function withOcrTimeout(operation) {
+  let timer;
+  try {
+    return await Promise.race([
+      operation,
+      new Promise((_, reject) => {
+        timer = setTimeout(() => reject(new Error("OCR took too long on this page. Try a smaller or clearer scan.")), OCR_TIMEOUT);
+      }),
+    ]);
+  } catch (error) {
+    throw error instanceof Error ? error : new Error("OCR could not read this page. Try a clearer scan.");
+  } finally {
+    clearTimeout(timer);
+  }
+}
 
 function embeddedWords(items, viewport) {
   return items.flatMap((item) => {
@@ -24,7 +78,7 @@ async function scannedWords(page, worker, scale) {
   canvas.height = Math.floor(viewport.height);
   try {
     await page.render({ canvas, viewport }).promise;
-    const { data } = await worker.recognize(canvas, {}, { text: false, blocks: true });
+    const { data } = await withOcrTimeout(worker.recognize(canvas, {}, { text: false, blocks: true }));
     const words = (data.blocks ?? []).flatMap((block) => block.paragraphs)
       .flatMap((paragraph) => paragraph.lines).flatMap((line) => line.words)
       .filter((word) => word.text.trim());
@@ -58,13 +112,10 @@ export async function readPdf(file, progress) {
         progress(`${label} · reading embedded text`);
         pages.push({ words, ocr: false });
       } else {
-        progress(`${label} · loading English OCR`);
         if (!worker) {
-          const { createWorker, OEM } = await import("tesseract.js");
-          worker = await createWorker("eng", OEM.LSTM_ONLY, {
-            workerPath: "/ocr/worker.min.js", corePath: "/ocr/", langPath: "/ocr", workerBlobURL: false,
-          });
-          await worker.setParameters({ tessedit_pageseg_mode: "6" });
+          progress(`${label} · loading English OCR`);
+          worker = await startOcr();
+          await withOcrTimeout(worker.setParameters({ tessedit_pageseg_mode: "6" }));
         }
         progress(`${label} · recognizing scanned text`);
         const scale = Math.min(3, 2400 / Math.max(viewport.width, viewport.height));
