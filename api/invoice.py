@@ -6,7 +6,7 @@ import logging
 import os
 from queue import Queue
 from threading import Thread
-from typing import Annotated
+from typing import Annotated, Literal
 from uuid import UUID, uuid4
 
 from fastapi import FastAPI, HTTPException, Request, Response
@@ -16,6 +16,7 @@ from pydantic import BaseModel, Field, StringConstraints, model_validator
 from demo import SAMPLES, make_invoice
 from extract import extract_pages
 from inference import InferenceUnavailable, infer_review
+from purchase_orders import MAX_CSV_SIZE, load_catalog
 from reconcile import history, reconcile, save_review_advice
 
 
@@ -66,6 +67,13 @@ class RunRequest(BaseModel):
     pages: list[Page] = Field(min_length=1, max_length=10)
     use_ai: bool = False
     ledger: BrowserLedger | None = None
+    catalog_id: str = Field(default="demo", pattern=r"^(demo|[a-f0-9]{64})$")
+    catalog_csv: str | None = Field(default=None, max_length=MAX_CSV_SIZE)
+
+
+class CatalogRequest(BaseModel):
+    action: Literal["validate_catalog"]
+    csv: str = Field(max_length=MAX_CSV_SIZE)
 
 
 def workspace(request):
@@ -91,6 +99,21 @@ def local_database():
     return None if os.environ.get("VERCEL") else os.environ.get("INVOICE_DB_PATH")
 
 
+def ledger_scope(workspace_id, catalog_id):
+    return workspace_id if catalog_id == "demo" else f"{workspace_id}:{catalog_id}"
+
+
+def catalog_details(catalog_id, orders):
+    return {"id": catalog_id, "count": len(orders), "rows": sum(map(len, orders.values()))}
+
+
+def uploaded_catalog(text):
+    try:
+        return load_catalog(text)
+    except ValueError as error:
+        raise HTTPException(422, str(error)) from error
+
+
 def inference_settings():
     return {"api_key": os.environ.get("LLM_API_KEY"), "base_url": os.environ.get("LLM_BASE_URL"),
             "model": os.environ.get("LLM_MODEL")}
@@ -98,30 +121,41 @@ def inference_settings():
 
 @app.get("/")
 @app.get("/api/invoice")
-def get_workspace(request: Request, demo: str | None = None):
+def get_workspace(request: Request, demo: str | None = None, catalog_id: str = "demo"):
     if demo:
         if demo not in SAMPLES:
             raise HTTPException(404, "Demo invoice does not exist.")
         return Response(make_invoice(*SAMPLES[demo]), media_type="application/pdf",
                         headers={"Cache-Control": "public, max-age=3600"})
     db_path = local_database()
+    if catalog_id != "demo" and (len(catalog_id) != 64 or any(char not in "0123456789abcdef" for char in catalog_id)):
+        raise HTTPException(422, "Invalid PO catalog ID.")
     scope = workspace(request) if db_path else None
     try:
-        runs = history(scope=scope, db_path=db_path) if db_path else []
+        runs = history(scope=ledger_scope(scope, catalog_id), db_path=db_path) if db_path else []
+        default_id, orders = load_catalog()
     except Exception:
         log.exception("Could not load invoice history")
         raise HTTPException(503, "The invoice ledger is unavailable.") from None
     return private_response(JSONResponse({
         "runs": runs, "ai_enabled": all(inference_settings().values()),
         "demos": list(SAMPLES), "storage": "SQLite", "browser_ledger": not db_path,
+        "default_catalog": catalog_details(default_id, orders),
     }), request, scope)
 
 
 @app.post("/")
 @app.post("/api/invoice")
-def run_invoice(payload: RunRequest, request: Request):
+def run_invoice(payload: RunRequest | CatalogRequest, request: Request):
+    if isinstance(payload, CatalogRequest):
+        catalog_id, orders = uploaded_catalog(payload.csv)
+        return JSONResponse(catalog_details(catalog_id, orders), headers={"Cache-Control": "no-store"})
+    catalog_id, orders = uploaded_catalog(payload.catalog_csv)
+    if catalog_id != payload.catalog_id:
+        raise HTTPException(422, "The PO CSV changed. Upload it again before running the invoice.")
     db_path = local_database()
     scope = workspace(request) if db_path else None
+    storage_scope = ledger_scope(scope, catalog_id) if db_path else None
     if not db_path and payload.ledger is None:
         raise HTTPException(422, "Browser history is missing. Reload the app and try again.")
     ai = inference_settings()
@@ -137,12 +171,13 @@ def run_invoice(payload: RunRequest, request: Request):
                 emit("extract", "Reading vendor, invoice number, totals and line items from the PDF")
                 invoice = extract_pages([page.model_dump() for page in payload.pages])
                 if db_path:
-                    outcome = reconcile(invoice, payload.filename, emit, scope=scope, db_path=db_path)
+                    outcome = reconcile(invoice, payload.filename, emit, scope=storage_scope, db_path=db_path, orders=orders)
                 else:
                     outcome = reconcile(
                         invoice, payload.filename, emit,
                         approvals=[row.model_dump(mode="json") for row in payload.ledger.approvals],
                         run_id=payload.ledger.last_run_id + 1,
+                        orders=orders,
                     )
                 approval = outcome.pop("approval", None)
                 if outcome["status"] == "Needs review" and payload.use_ai and all(ai.values()):
@@ -150,7 +185,7 @@ def run_invoice(payload: RunRequest, request: Request):
                     try:
                         advice = infer_review(outcome, **ai)
                         if db_path:
-                            outcome = save_review_advice(outcome, advice, scope=scope, db_path=db_path)
+                            outcome = save_review_advice(outcome, advice, scope=storage_scope, db_path=db_path)
                         else:
                             outcome["review_advice"] = advice
                     except InferenceUnavailable:

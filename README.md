@@ -38,6 +38,24 @@ Open the URL printed by Vite. The app uses the same per-browser ledger as Vercel
 | **04 · Quantity overage** | Routes the invoice to review when four paper cases are requested with only three remaining. |
 | **Run 01 again** | Detects a duplicate using vendor and invoice number. The prior approval stays in effect without consuming quantities again. |
 
+## Upload your own purchase orders
+
+Under **Purchase orders**, select **Upload PO CSV** before reviewing the invoice PDF. Use a UTF-8 CSV with up to 100 line items (128 KB maximum). A PO can span multiple rows. Each row must have a SKU, and each PO must use one vendor and currency with unique SKUs.
+
+```csv
+po,vendor,currency,sku,description,quantity,unit_price
+PO-1023,Northstar Supply,USD,PPR-01,Copy paper case,10,50.00
+PO-1023,Northstar Supply,USD,TNR-02,Black toner cartridge,5,100.00
+```
+
+All seven columns are required. Column order can vary, and extra columns are ignored. Quantity must be positive and unit price must be non-negative. Do not include currency symbols in numeric fields. The app checks the CSV before activating it. Each distinct catalog keeps separate approval balances and run history. Select **Use built-in POs** to return to the demo catalog.
+
+The three downloads include the demo purchase orders, so you can upload any of them and run the built-in PDF examples.
+
+- [Office purchase orders, 12 lines](public/samples/office-purchase-orders.csv)
+- [Operations purchase orders, 48 lines](public/samples/operations-purchase-orders.csv)
+- [Multi-vendor purchase orders, 100 lines](public/samples/multi-vendor-purchase-orders.csv)
+
 ## Decision policy
 
 1. PDF.js reads embedded text. Tesseract OCR handles scanned pages. The parser extracts labeled header fields and simple line-item tables. Missing fields, unsupported layouts and uncertain numeric OCR evidence go to review.
@@ -49,5 +67,7 @@ Open the URL printed by Vite. The app uses the same per-browser ledger as Vercel
 ## Optional LLM inference
 
 Set `LLM_API_KEY`, `LLM_BASE_URL` and `LLM_MODEL` as server-side environment variables. The API must support OpenAI-compatible Chat Completions. Enable **Generate AI review guidance** before running an exception. The deterministic decision remains available if the provider fails.
+
+On Vercel, add these under **Project Settings → Environment Variables** for **Production**, then redeploy. Keep the API key out of the repository.
 
 Use the model to explain the most likely cause of an exception, distinguish plausible PO candidates from the shortlist, and suggest what the analyst should verify. The model sees a bounded set of reconciliation evidence, with no raw PDF, invoice number, or vendor name. It can only propose a shortlisted PO. Extraction, vendor approval, duplicate detection, quantities, arithmetic and tolerance are deterministic.

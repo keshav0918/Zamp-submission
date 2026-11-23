@@ -1,0 +1,101 @@
+po,vendor,currency,sku,description,quantity,unit_price
+PO-1023,Northstar Supply,USD,PPR-01,Copy paper case,10,50.00
+PO-1023,Northstar Supply,USD,TNR-02,Black toner cartridge,5,100.00
+PO-1087,Northstar Supply,USD,BOX-03,Shipping box bundle,20,25.00
+PO-2100,Harbor Office,USD,PPR-01,Copy paper case,4,50.00
+PO-5100,Cedar Office Supply,USD,PAD-12,"Legal writing pads, pack of 12",4,18.50
+PO-5100,Cedar Office Supply,USD,PEN-24,"Black gel pens, box of 24",7,22.75
+PO-5100,Cedar Office Supply,USD,ENV-10,Window envelopes No. 10,10,12.30
+PO-5100,Cedar Office Supply,USD,FLD-25,"Letter file folders, box of 25",13,16.40
+PO-5101,Meridian Packaging,USD,TPE-06,"Packing tape, six rolls",11,14.75
+PO-5101,Meridian Packaging,USD,MLR-50,"Padded mailers, case of 50",14,33.50
+PO-5101,Meridian Packaging,USD,LBL-400,"Thermal labels, 400 per roll",17,21.60
+PO-5101,Meridian Packaging,USD,WRP-400,"Stretch wrap, 400 m roll",20,24.20
+PO-5102,Alder IT Services,USD,HUB-07,Seven-port USB-C hub,18,43.50
+PO-5102,Alder IT Services,USD,KEY-02,USB keyboard,21,27.95
+PO-5102,Alder IT Services,USD,CAB-02,"USB-C cable, 2 m",24,9.20
+PO-5102,Alder IT Services,USD,MNT-01,Single monitor arm,27,72.40
+PO-5103,Fern Facilities,GBP,GLV-100,"Nitrile gloves, box of 100",25,8.40
+PO-5103,Fern Facilities,GBP,CLT-10,"Microfibre cloths, pack of 10",28,6.80
+PO-5103,Fern Facilities,GBP,BIN-60,"Recycling bin, 60 L",31,47.00
+PO-5103,Fern Facilities,GBP,SOP-05,"Hand soap refill, 5 L",34,15.80
+PO-5104,Rhein Workshop Supply,EUR,BIT-13,"Drill bit set, 13 pieces",32,29.90
+PO-5104,Rhein Workshop Supply,EUR,PPE-02,"Safety glasses, clear lens",35,7.25
+PO-5104,Rhein Workshop Supply,EUR,TOL-01,Digital torque wrench,38,112.80
+PO-5104,Rhein Workshop Supply,EUR,MSR-05,"Tape measure, 5 m",41,11.60
+PO-5105,Summit Kitchen Co,USD,MUG-12,"Ceramic mugs, set of 12",39,28.00
+PO-5105,Summit Kitchen Co,USD,JUG-2,"Insulated jug, 2 L",42,19.85
+PO-5105,Summit Kitchen Co,USD,CUP-50,"Reusable cups, case of 50",5,37.40
+PO-5105,Summit Kitchen Co,USD,FLT-100,"Paper filters, pack of 100",8,6.50
+PO-5106,Cedar Office Supply,USD,PAD-12,"Legal writing pads, pack of 12",6,18.50
+PO-5106,Cedar Office Supply,USD,PEN-24,"Black gel pens, box of 24",9,22.75
+PO-5106,Cedar Office Supply,USD,ENV-10,Window envelopes No. 10,12,12.30
+PO-5106,Cedar Office Supply,USD,FLD-25,"Letter file folders, box of 25",15,16.40
+PO-5107,Meridian Packaging,USD,TPE-06,"Packing tape, six rolls",13,14.75
+PO-5107,Meridian Packaging,USD,MLR-50,"Padded mailers, case of 50",16,33.50
+PO-5107,Meridian Packaging,USD,LBL-400,"Thermal labels, 400 per roll",19,21.60
+PO-5107,Meridian Packaging,USD,WRP-400,"Stretch wrap, 400 m roll",22,24.20
+PO-5108,Alder IT Services,USD,HUB-07,Seven-port USB-C hub,20,43.50
+PO-5108,Alder IT Services,USD,KEY-02,USB keyboard,23,27.95
+PO-5108,Alder IT Services,USD,CAB-02,"USB-C cable, 2 m",26,9.20
+PO-5108,Alder IT Services,USD,MNT-01,Single monitor arm,29,72.40
+PO-5109,Fern Facilities,GBP,GLV-100,"Nitrile gloves, box of 100",27,8.40
+PO-5109,Fern Facilities,GBP,CLT-10,"Microfibre cloths, pack of 10",30,6.80
+PO-5109,Fern Facilities,GBP,BIN-60,"Recycling bin, 60 L",33,47.00
+PO-5109,Fern Facilities,GBP,SOP-05,"Hand soap refill, 5 L",36,15.80
+PO-5110,Rhein Workshop Supply,EUR,BIT-13,"Drill bit set, 13 pieces",34,29.90
+PO-5110,Rhein Workshop Supply,EUR,PPE-02,"Safety glasses, clear lens",37,7.25
+PO-5110,Rhein Workshop Supply,EUR,TOL-01,Digital torque wrench,40,112.80
+PO-5110,Rhein Workshop Supply,EUR,MSR-05,"Tape measure, 5 m",43,11.60
+PO-5111,Summit Kitchen Co,USD,MUG-12,"Ceramic mugs, set of 12",41,28.00
+PO-5111,Summit Kitchen Co,USD,JUG-2,"Insulated jug, 2 L",4,19.85
+PO-5111,Summit Kitchen Co,USD,CUP-50,"Reusable cups, case of 50",7,37.40
+PO-5111,Summit Kitchen Co,USD,FLT-100,"Paper filters, pack of 100",10,6.50
+PO-5112,Cedar Office Supply,USD,PAD-12,"Legal writing pads, pack of 12",8,18.50
+PO-5112,Cedar Office Supply,USD,PEN-24,"Black gel pens, box of 24",11,22.75
+PO-5112,Cedar Office Supply,USD,ENV-10,Window envelopes No. 10,14,12.30
+PO-5112,Cedar Office Supply,USD,FLD-25,"Letter file folders, box of 25",17,16.40
+PO-5113,Meridian Packaging,USD,TPE-06,"Packing tape, six rolls",15,14.75
+PO-5113,Meridian Packaging,USD,MLR-50,"Padded mailers, case of 50",18,33.50
+PO-5113,Meridian Packaging,USD,LBL-400,"Thermal labels, 400 per roll",21,21.60
+PO-5113,Meridian Packaging,USD,WRP-400,"Stretch wrap, 400 m roll",24,24.20
+PO-5114,Alder IT Services,USD,HUB-07,Seven-port USB-C hub,22,43.50
+PO-5114,Alder IT Services,USD,KEY-02,USB keyboard,25,27.95
+PO-5114,Alder IT Services,USD,CAB-02,"USB-C cable, 2 m",28,9.20
+PO-5114,Alder IT Services,USD,MNT-01,Single monitor arm,31,72.40
+PO-5115,Fern Facilities,GBP,GLV-100,"Nitrile gloves, box of 100",29,8.40
+PO-5115,Fern Facilities,GBP,CLT-10,"Microfibre cloths, pack of 10",32,6.80
+PO-5115,Fern Facilities,GBP,BIN-60,"Recycling bin, 60 L",35,47.00
+PO-5115,Fern Facilities,GBP,SOP-05,"Hand soap refill, 5 L",38,15.80
+PO-5116,Rhein Workshop Supply,EUR,BIT-13,"Drill bit set, 13 pieces",36,29.90
+PO-5116,Rhein Workshop Supply,EUR,PPE-02,"Safety glasses, clear lens",39,7.25
+PO-5116,Rhein Workshop Supply,EUR,TOL-01,Digital torque wrench,42,112.80
+PO-5116,Rhein Workshop Supply,EUR,MSR-05,"Tape measure, 5 m",5,11.60
+PO-5117,Summit Kitchen Co,USD,MUG-12,"Ceramic mugs, set of 12",43,28.00
+PO-5117,Summit Kitchen Co,USD,JUG-2,"Insulated jug, 2 L",6,19.85
+PO-5117,Summit Kitchen Co,USD,CUP-50,"Reusable cups, case of 50",9,37.40
+PO-5117,Summit Kitchen Co,USD,FLT-100,"Paper filters, pack of 100",12,6.50
+PO-5118,Cedar Office Supply,USD,PAD-12,"Legal writing pads, pack of 12",10,18.50
+PO-5118,Cedar Office Supply,USD,PEN-24,"Black gel pens, box of 24",13,22.75
+PO-5118,Cedar Office Supply,USD,ENV-10,Window envelopes No. 10,16,12.30
+PO-5118,Cedar Office Supply,USD,FLD-25,"Letter file folders, box of 25",19,16.40
+PO-5119,Meridian Packaging,USD,TPE-06,"Packing tape, six rolls",17,14.75
+PO-5119,Meridian Packaging,USD,MLR-50,"Padded mailers, case of 50",20,33.50
+PO-5119,Meridian Packaging,USD,LBL-400,"Thermal labels, 400 per roll",23,21.60
+PO-5119,Meridian Packaging,USD,WRP-400,"Stretch wrap, 400 m roll",26,24.20
+PO-5120,Alder IT Services,USD,HUB-07,Seven-port USB-C hub,24,43.50
+PO-5120,Alder IT Services,USD,KEY-02,USB keyboard,27,27.95
+PO-5120,Alder IT Services,USD,CAB-02,"USB-C cable, 2 m",30,9.20
+PO-5120,Alder IT Services,USD,MNT-01,Single monitor arm,33,72.40
+PO-5121,Fern Facilities,GBP,GLV-100,"Nitrile gloves, box of 100",31,8.40
+PO-5121,Fern Facilities,GBP,CLT-10,"Microfibre cloths, pack of 10",34,6.80
+PO-5121,Fern Facilities,GBP,BIN-60,"Recycling bin, 60 L",37,47.00
+PO-5121,Fern Facilities,GBP,SOP-05,"Hand soap refill, 5 L",40,15.80
+PO-5122,Rhein Workshop Supply,EUR,BIT-13,"Drill bit set, 13 pieces",38,29.90
+PO-5122,Rhein Workshop Supply,EUR,PPE-02,"Safety glasses, clear lens",41,7.25
+PO-5122,Rhein Workshop Supply,EUR,TOL-01,Digital torque wrench,4,112.80
+PO-5122,Rhein Workshop Supply,EUR,MSR-05,"Tape measure, 5 m",7,11.60
+PO-5123,Summit Kitchen Co,USD,MUG-12,"Ceramic mugs, set of 12",5,28.00
+PO-5123,Summit Kitchen Co,USD,JUG-2,"Insulated jug, 2 L",8,19.85
+PO-5123,Summit Kitchen Co,USD,CUP-50,"Reusable cups, case of 50",11,37.40
+PO-5123,Summit Kitchen Co,USD,FLT-100,"Paper filters, pack of 100",14,6.50

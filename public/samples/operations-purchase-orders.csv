@@ -1,0 +1,49 @@
+po,vendor,currency,sku,description,quantity,unit_price
+PO-1023,Northstar Supply,USD,PPR-01,Copy paper case,10,50.00
+PO-1023,Northstar Supply,USD,TNR-02,Black toner cartridge,5,100.00
+PO-1087,Northstar Supply,USD,BOX-03,Shipping box bundle,20,25.00
+PO-2100,Harbor Office,USD,PPR-01,Copy paper case,4,50.00
+PO-4100,Cedar Office Supply,USD,PAD-12,"Legal writing pads, pack of 12",4,18.50
+PO-4100,Cedar Office Supply,USD,PEN-24,"Black gel pens, box of 24",7,22.75
+PO-4100,Cedar Office Supply,USD,ENV-10,Window envelopes No. 10,10,12.30
+PO-4100,Cedar Office Supply,USD,FLD-25,"Letter file folders, box of 25",13,16.40
+PO-4101,Meridian Packaging,USD,TPE-06,"Packing tape, six rolls",11,14.75
+PO-4101,Meridian Packaging,USD,MLR-50,"Padded mailers, case of 50",14,33.50
+PO-4101,Meridian Packaging,USD,LBL-400,"Thermal labels, 400 per roll",17,21.60
+PO-4101,Meridian Packaging,USD,WRP-400,"Stretch wrap, 400 m roll",20,24.20
+PO-4102,Alder IT Services,USD,HUB-07,Seven-port USB-C hub,18,43.50
+PO-4102,Alder IT Services,USD,KEY-02,USB keyboard,21,27.95
+PO-4102,Alder IT Services,USD,CAB-02,"USB-C cable, 2 m",24,9.20
+PO-4102,Alder IT Services,USD,MNT-01,Single monitor arm,27,72.40
+PO-4103,Summit Kitchen Co,USD,MUG-12,"Ceramic mugs, set of 12",25,28.00
+PO-4103,Summit Kitchen Co,USD,JUG-2,"Insulated jug, 2 L",28,19.85
+PO-4103,Summit Kitchen Co,USD,CUP-50,"Reusable cups, case of 50",31,37.40
+PO-4103,Summit Kitchen Co,USD,FLT-100,"Paper filters, pack of 100",34,6.50
+PO-4104,Cedar Office Supply,USD,PAD-12,"Legal writing pads, pack of 12",32,18.50
+PO-4104,Cedar Office Supply,USD,PEN-24,"Black gel pens, box of 24",35,22.75
+PO-4104,Cedar Office Supply,USD,ENV-10,Window envelopes No. 10,38,12.30
+PO-4104,Cedar Office Supply,USD,FLD-25,"Letter file folders, box of 25",41,16.40
+PO-4105,Meridian Packaging,USD,TPE-06,"Packing tape, six rolls",39,14.75
+PO-4105,Meridian Packaging,USD,MLR-50,"Padded mailers, case of 50",42,33.50
+PO-4105,Meridian Packaging,USD,LBL-400,"Thermal labels, 400 per roll",5,21.60
+PO-4105,Meridian Packaging,USD,WRP-400,"Stretch wrap, 400 m roll",8,24.20
+PO-4106,Alder IT Services,USD,HUB-07,Seven-port USB-C hub,6,43.50
+PO-4106,Alder IT Services,USD,KEY-02,USB keyboard,9,27.95
+PO-4106,Alder IT Services,USD,CAB-02,"USB-C cable, 2 m",12,9.20
+PO-4106,Alder IT Services,USD,MNT-01,Single monitor arm,15,72.40
+PO-4107,Summit Kitchen Co,USD,MUG-12,"Ceramic mugs, set of 12",13,28.00
+PO-4107,Summit Kitchen Co,USD,JUG-2,"Insulated jug, 2 L",16,19.85
+PO-4107,Summit Kitchen Co,USD,CUP-50,"Reusable cups, case of 50",19,37.40
+PO-4107,Summit Kitchen Co,USD,FLT-100,"Paper filters, pack of 100",22,6.50
+PO-4108,Cedar Office Supply,USD,PAD-12,"Legal writing pads, pack of 12",20,18.50
+PO-4108,Cedar Office Supply,USD,PEN-24,"Black gel pens, box of 24",23,22.75
+PO-4108,Cedar Office Supply,USD,ENV-10,Window envelopes No. 10,26,12.30
+PO-4108,Cedar Office Supply,USD,FLD-25,"Letter file folders, box of 25",29,16.40
+PO-4109,Meridian Packaging,USD,TPE-06,"Packing tape, six rolls",27,14.75
+PO-4109,Meridian Packaging,USD,MLR-50,"Padded mailers, case of 50",30,33.50
+PO-4109,Meridian Packaging,USD,LBL-400,"Thermal labels, 400 per roll",33,21.60
+PO-4109,Meridian Packaging,USD,WRP-400,"Stretch wrap, 400 m roll",36,24.20
+PO-4110,Alder IT Services,USD,HUB-07,Seven-port USB-C hub,34,43.50
+PO-4110,Alder IT Services,USD,KEY-02,USB keyboard,37,27.95
+PO-4110,Alder IT Services,USD,CAB-02,"USB-C cable, 2 m",40,9.20
+PO-4110,Alder IT Services,USD,MNT-01,Single monitor arm,43,72.40

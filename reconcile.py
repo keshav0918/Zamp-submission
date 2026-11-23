@@ -1,38 +1,19 @@
 """Resolve a purchase order and record the decision in one transaction."""
 
 from collections import defaultdict
-import csv
 from decimal import Decimal
 import json
-from pathlib import Path
-import re
 
 from rapidfuzz import fuzz
 
 from ledger import open_ledger
+from purchase_orders import load_catalog, normalize, reference
 
 
-PO_CSV = Path(__file__).resolve().parent / "data" / "purchase_orders.csv"
 CENT = Decimal("0.01")
 UNIT_RATE = Decimal("0.01")
 UNIT_CAP = Decimal("0.50")
 PO_CAP = Decimal("1.00")
-
-
-def normalize(text):
-    return " ".join(re.findall(r"\w+", text.casefold()))
-
-
-def reference(text):
-    return re.sub(r"[^A-Z0-9]", "", text.upper())
-
-
-def load_orders():
-    orders = defaultdict(list)
-    with PO_CSV.open(newline="") as source:
-        for row in csv.DictReader(source):
-            orders[row["po"]].append(row)
-    return orders
 
 
 def same_supplier(invoice, order):
@@ -170,10 +151,11 @@ def _match(invoice, orders, used_by_po):
     return "", "No candidate", [], "No matching open PO was found in the approved dataset."
 
 
-def reconcile(invoice, filename, stage=lambda *_: None, *, scope="", db_path=None, approvals=None, run_id=None):
+def reconcile(invoice, filename, stage=lambda *_: None, *, scope="", db_path=None, approvals=None, run_id=None, orders=None):
     stage("validate", "Checking required fields and invoice arithmetic")
     reasons = validate(invoice)
-    orders = load_orders()
+    if orders is None:
+        _, orders = load_catalog()
     if not any(normalize(lines[0]["vendor"]) == normalize(invoice.vendor) for lines in orders.values()):
         reasons.append("Vendor is outside the approved PO dataset.")
 

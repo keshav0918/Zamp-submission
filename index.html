@@ -27,6 +27,24 @@
         </div>
         <div class="work-grid">
           <section class="card intake" aria-labelledby="intake-title">
+            <div class="catalog">
+              <div class="card-header"><h2>Purchase orders</h2><span>CSV</span></div>
+              <p id="catalog-status" class="meta" role="status">Loading built-in purchase orders</p>
+              <div class="catalog-actions">
+                <label for="catalog-input" class="sample catalog-upload">Upload PO CSV</label>
+                <input type="file" id="catalog-input" accept=".csv,text/csv" class="visually-hidden" disabled>
+                <button type="button" id="catalog-reset" class="link-button" hidden>Use built-in POs</button>
+              </div>
+              <p id="catalog-error" class="error" role="alert" hidden></p>
+              <details class="catalog-downloads">
+                <summary>Download sample PO CSVs</summary>
+                <ul>
+                  <li><a href="/samples/office-purchase-orders.csv" download>Office · 12 line items</a></li>
+                  <li><a href="/samples/operations-purchase-orders.csv" download>Operations · 48 line items</a></li>
+                  <li><a href="/samples/multi-vendor-purchase-orders.csv" download>Multi-vendor · 100 line items</a></li>
+                </ul>
+              </details>
+            </div>
             <div class="card-header"><h2 id="intake-title">Source document</h2><span>PDF</span></div>
             <form id="run-form">
               <input type="file" id="file-input" accept=".pdf,application/pdf" class="visually-hidden">

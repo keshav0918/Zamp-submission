@@ -3,6 +3,7 @@ import "./style.css";
 const $ = (selector) => document.querySelector(selector);
 const endpoint = "/api/invoice";
 const ledgerKey = "invoice-review-ledger-v1";
+const catalogKey = "invoice-review-po-catalog-v1";
 const labels = {
   "01-readable-match.pdf": "01 · Readable invoice",
   "02-scanned-mistyped-po.pdf": "02 · Scanned PO typo",
@@ -19,6 +20,7 @@ const stages = [
 ];
 const state = {
   file: null, busy: false, ready: false, browserLedger: false,
+  catalog: null, catalogBusy: false,
   runs: [], demos: [], step: -1, detail: "", finished: false,
 };
 
@@ -80,10 +82,13 @@ function setStage(id, detail) {
 }
 
 function renderControls() {
-  $("#run-button").disabled = !state.file || state.busy || !state.ready;
-  $("#file-input").disabled = state.busy;
-  $("#ai-toggle").disabled = state.busy;
-  for (const button of $("#sample-list").querySelectorAll("button")) button.disabled = state.busy || !state.ready;
+  const busy = state.busy || state.catalogBusy;
+  $("#run-button").disabled = !state.file || busy || !state.ready;
+  $("#file-input").disabled = busy;
+  $("#ai-toggle").disabled = busy;
+  $("#catalog-input").disabled = busy || !state.ready;
+  $("#catalog-reset").disabled = busy;
+  for (const button of $("#sample-list").querySelectorAll("button")) button.disabled = busy || !state.ready;
 }
 
 function showError(message) {
@@ -167,34 +172,94 @@ async function errorMessage(response) {
   return typeof body?.detail === "string" ? body.detail : `The request could not be completed (${response.status}).`;
 }
 
-function browserLedger() {
+function ledgerFor(catalog) {
+  return catalog ? `${ledgerKey}:${catalog.id}` : ledgerKey;
+}
+
+function browserLedger(key) {
   try {
-    return JSON.parse(localStorage.getItem(ledgerKey))
+    return JSON.parse(localStorage.getItem(key))
       ?? { last_run_id: 0, approvals: [], runs: [] };
   } catch {
     throw new Error("Browser storage is unavailable. Allow it for this site to save and review invoices.");
   }
 }
 
-async function refreshWorkspace() {
-  const response = await fetch(endpoint);
+function rememberedCatalog() {
+  try {
+    const catalog = JSON.parse(localStorage.getItem(catalogKey));
+    return catalog && /^[a-f0-9]{64}$/.test(catalog.id) && typeof catalog.csv === "string" ? catalog : null;
+  } catch {
+    return null;
+  }
+}
+
+async function refreshWorkspace(catalog = state.catalog, remember = false) {
+  const response = await fetch(`${endpoint}?catalog_id=${catalog?.id ?? "demo"}`);
   if (!response.ok) throw new Error(await errorMessage(response));
   const payload = await response.json();
-  state.browserLedger = payload.browser_ledger;
-  if (state.browserLedger && !navigator.locks) {
+  if (payload.browser_ledger && !navigator.locks) {
     throw new Error("Use a current browser over HTTPS to save invoice runs.");
   }
-  state.runs = state.browserLedger ? browserLedger().runs : payload.runs;
+  const runs = payload.browser_ledger ? browserLedger(ledgerFor(catalog)).runs : payload.runs;
+  if (remember) {
+    if (catalog) localStorage.setItem(catalogKey, JSON.stringify(catalog));
+    else localStorage.removeItem(catalogKey);
+  }
+  state.browserLedger = payload.browser_ledger;
+  state.catalog = catalog;
+  state.runs = runs;
   state.demos = payload.demos;
   state.ready = true;
   const connection = $("#connection");
   connection.dataset.state = "ok";
   connection.innerHTML = "<i></i> Ledger connected";
   $("#ai-control").hidden = !payload.ai_enabled;
+  const active = catalog ?? payload.default_catalog;
+  $("#catalog-status").textContent = `${catalog?.name ?? "Built-in demo POs"} · ${active.count} purchase orders · ${active.rows} line items`;
+  $("#catalog-reset").hidden = !catalog;
   $("#sample-list").innerHTML = state.demos.map((file) =>
     `<button class="sample" type="button" data-sample="${escape(file)}">${escape(labels[file] || file)}</button>`).join("");
   renderHistory();
   renderControls();
+}
+
+async function changeCatalog(file) {
+  if (state.busy || state.catalogBusy) return;
+  state.catalogBusy = true;
+  const errorNode = $("#catalog-error");
+  errorNode.hidden = true;
+  renderControls();
+  try {
+    let catalog = null;
+    if (file) {
+      if (!file.name.toLowerCase().endsWith(".csv")) throw new Error("Choose a .csv file.");
+      if (file.size > 128 * 1024) throw new Error("The PO CSV must be 128 KB or smaller.");
+      const csv = await file.text();
+      const response = await fetch(endpoint, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "validate_catalog", csv }),
+      });
+      if (!response.ok) throw new Error(await errorMessage(response));
+      catalog = { ...await response.json(), name: file.name, csv };
+    }
+    await refreshWorkspace(catalog, true);
+    $("#result").hidden = true;
+    $("#history-result").hidden = true;
+    $("#pipeline-status").textContent = "Waiting for invoice";
+    showError("");
+    state.step = -1;
+    state.finished = false;
+    drawSteps();
+  } catch (error) {
+    errorNode.textContent = error.message || "The PO catalog could not be loaded.";
+    errorNode.hidden = false;
+  } finally {
+    state.catalogBusy = false;
+    $("#catalog-input").value = "";
+    renderControls();
+  }
 }
 
 async function readEvents(response) {
@@ -237,17 +302,19 @@ async function requestDecision(payload) {
 }
 
 async function recordDecision(payload) {
+  payload = { ...payload, catalog_id: state.catalog?.id ?? "demo", catalog_csv: state.catalog?.csv ?? null };
   if (!state.browserLedger) return (await requestDecision(payload)).outcome;
 
-  return navigator.locks.request(ledgerKey, async () => {
-    const { last_run_id, approvals, runs } = browserLedger();
+  const key = ledgerFor(state.catalog);
+  return navigator.locks.request(key, async () => {
+    const { last_run_id, approvals, runs } = browserLedger(key);
     if (approvals.length >= 1000) throw new Error("This demo workspace has reached its approval limit.");
     const { outcome, approval } = await requestDecision({ ...payload, ledger: { last_run_id, approvals } });
     const updatedRuns = [
       { run_id: outcome.run_id, created: new Date().toISOString(), filename: payload.filename, outcome }, ...runs,
     ].slice(0, 100);
     try {
-      localStorage.setItem(ledgerKey, JSON.stringify({
+      localStorage.setItem(key, JSON.stringify({
         last_run_id: outcome.run_id, approvals: approval ? [...approvals, approval] : approvals, runs: updatedRuns,
       }));
     } catch {
@@ -260,7 +327,7 @@ async function recordDecision(payload) {
 }
 
 async function runInvoice(getFile) {
-  if (state.busy || !state.ready) return;
+  if (state.busy || state.catalogBusy || !state.ready) return;
   state.busy = true;
   state.finished = false;
   $("#result").hidden = true;
@@ -290,8 +357,9 @@ async function runInvoice(getFile) {
 }
 
 window.addEventListener("storage", ({ key }) => {
-  if (state.browserLedger && (key === ledgerKey || key === null)) {
-    state.runs = browserLedger().runs;
+  const currentKey = ledgerFor(state.catalog);
+  if (state.browserLedger && (key === currentKey || key === null)) {
+    state.runs = browserLedger(currentKey).runs;
     renderHistory();
   }
 });
@@ -299,6 +367,10 @@ window.addEventListener("storage", ({ key }) => {
 $("#nav-run").addEventListener("click", () => showView("run"));
 $("#nav-history").addEventListener("click", () => showView("history"));
 $("#history-new").addEventListener("click", () => showView("run"));
+$("#catalog-input").addEventListener("change", ({ target }) => {
+  if (target.files[0]) changeCatalog(target.files[0]);
+});
+$("#catalog-reset").addEventListener("click", () => changeCatalog(null));
 $("#file-input").addEventListener("change", ({ target }) => selectFile(target.files[0]));
 $("#run-form").addEventListener("submit", (event) => {
   event.preventDefault();
@@ -311,7 +383,7 @@ zone.addEventListener("dragleave", () => zone.classList.remove("dragging"));
 zone.addEventListener("drop", (event) => {
   event.preventDefault();
   zone.classList.remove("dragging");
-  if (!state.busy) selectFile(event.dataTransfer.files[0]);
+  if (!state.busy && !state.catalogBusy) selectFile(event.dataTransfer.files[0]);
 });
 
 $("#sample-list").addEventListener("click", (event) => {
@@ -334,7 +406,7 @@ $("#history-list").addEventListener("click", (event) => {
 
 drawSteps();
 renderHistory();
-refreshWorkspace().catch((error) => {
+refreshWorkspace(rememberedCatalog()).catch((error) => {
   $("#connection").dataset.state = "error";
   $("#connection").innerHTML = "<i></i> Ledger unavailable";
   showError(error.message);
