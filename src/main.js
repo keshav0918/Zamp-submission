@@ -4,8 +4,7 @@ const $ = (selector) => document.querySelector(selector);
 const endpoint = "/api/invoice";
 const ledgerKey = "invoice-review-ledger-v1";
 const catalogKey = "invoice-review-po-catalog-v1";
-const browserDemo = new URLSearchParams(location.search).get("ledger") === "browser";
-const runEndpoint = browserDemo ? `${endpoint}?ledger=browser` : endpoint;
+let browserDemo = new URLSearchParams(location.search).get("ledger") === "browser";
 const labels = {
   "01-readable-match.pdf": "01 · Readable invoice",
   "02-scanned-mistyped-po.pdf": "02 · Scanned PO typo",
@@ -21,8 +20,8 @@ const stages = [
   ["advice", "Generate AI guidance", "Suggest what the analyst should verify."],
 ];
 const state = {
-  file: null, busy: false, ready: false, browserLedger: false,
-  catalog: null, catalogBusy: false,
+  file: null, busy: false, ready: false, connecting: true, browserLedger: false,
+  catalog: null, defaultCatalog: null, catalogBusy: false,
   runs: [], step: -1, detail: "", finished: false,
 };
 
@@ -84,13 +83,13 @@ function setStage(id, detail) {
 }
 
 function renderControls() {
-  const busy = state.busy || state.catalogBusy;
-  $("#run-button").disabled = !state.file || busy || !state.ready;
+  const busy = state.busy || state.catalogBusy || state.connecting;
+  $("#run-button").disabled = !state.file || busy;
   $("#file-input").disabled = busy;
   $("#ai-toggle").disabled = busy;
-  $("#catalog-input").disabled = busy || !state.ready;
+  $("#catalog-input").disabled = busy;
   $("#catalog-reset").disabled = busy;
-  for (const button of $("#sample-list").querySelectorAll("button")) button.disabled = busy || !state.ready;
+  for (const button of $("#sample-list").querySelectorAll("button")) button.disabled = busy;
 }
 
 function showError(message) {
@@ -209,7 +208,29 @@ function showLedgerNotice(message, href, label) {
   $("#ledger-notice").hidden = false;
 }
 
-async function refreshWorkspace(catalog = state.catalog, remember = false) {
+function renderCatalog() {
+  const active = state.catalog ?? state.defaultCatalog;
+  const name = state.catalog?.name ?? "Built-in demo POs";
+  $("#catalog-status").textContent = active ? `${name} · ${active.count} purchase orders · ${active.rows} line items` : name;
+  $("#catalog-reset").hidden = !state.catalog;
+}
+
+function showWorkspaceFailure(error) {
+  state.ready = false;
+  state.runs = [];
+  $("#ai-control").hidden = true;
+  $("#connection").dataset.state = "error";
+  $("#connection").innerHTML = "<i></i> Ledger unavailable";
+  if (browserDemo) {
+    showLedgerNotice(error.message, location.pathname, "Retry configured ledger");
+  } else {
+    showLedgerNotice(error.message, "?ledger=browser", "Use browser demo");
+  }
+  renderHistory();
+}
+
+async function refreshWorkspace() {
+  const catalog = state.catalog;
   const query = new URLSearchParams({ catalog_id: catalog?.id ?? "demo" });
   if (browserDemo) query.set("ledger", "browser");
   const response = await fetch(`${endpoint}?${query}`);
@@ -219,12 +240,8 @@ async function refreshWorkspace(catalog = state.catalog, remember = false) {
     throw new Error("Use a current browser over HTTPS to save invoice runs.");
   }
   const runs = payload.browser_ledger ? browserLedger(ledgerFor(catalog)).runs : payload.runs;
-  if (remember) {
-    if (catalog) localStorage.setItem(catalogKey, JSON.stringify(catalog));
-    else localStorage.removeItem(catalogKey);
-  }
   state.browserLedger = payload.browser_ledger;
-  state.catalog = catalog;
+  state.defaultCatalog = payload.default_catalog;
   state.runs = runs;
   state.ready = true;
   const connection = $("#connection");
@@ -233,20 +250,32 @@ async function refreshWorkspace(catalog = state.catalog, remember = false) {
     connection.innerHTML = "<i></i> Browser demo";
     showLedgerNotice("Demo approvals and history stay in this browser.", location.pathname, "Retry configured ledger");
   } else {
+    $("#ledger-notice").hidden = true;
     connection.innerHTML = payload.storage === "PostgreSQL"
       ? "<i></i> PostgreSQL connected" : "<i></i> Ledger connected";
   }
   $("#ai-control").hidden = !payload.ai_enabled;
-  const active = catalog ?? payload.default_catalog;
-  $("#catalog-status").textContent = `${catalog?.name ?? "Built-in demo POs"} · ${active.count} purchase orders · ${active.rows} line items`;
-  $("#catalog-reset").hidden = !catalog;
+  renderCatalog();
   renderSamples(payload.demos);
   renderHistory();
   renderControls();
 }
 
+async function connectWorkspace() {
+  state.connecting = true;
+  renderControls();
+  try {
+    await refreshWorkspace();
+  } catch (error) {
+    showWorkspaceFailure(error);
+  } finally {
+    state.connecting = false;
+    renderControls();
+  }
+}
+
 async function changeCatalog(file) {
-  if (state.busy || state.catalogBusy) return;
+  if (state.busy || state.catalogBusy || state.connecting) return;
   state.catalogBusy = true;
   const errorNode = $("#catalog-error");
   errorNode.hidden = true;
@@ -265,7 +294,10 @@ async function changeCatalog(file) {
       if (!response.ok) throw new Error(await errorMessage(response));
       catalog = { ...await response.json(), name: file.name, csv };
     }
-    await refreshWorkspace(catalog, true);
+    if (catalog) localStorage.setItem(catalogKey, JSON.stringify(catalog));
+    else localStorage.removeItem(catalogKey);
+    state.catalog = catalog;
+    renderCatalog();
     $("#result").hidden = true;
     $("#history-result").hidden = true;
     $("#pipeline-status").textContent = "Waiting for invoice";
@@ -273,6 +305,7 @@ async function changeCatalog(file) {
     state.step = -1;
     state.finished = false;
     drawSteps();
+    if (state.ready) await refreshWorkspace().catch(showWorkspaceFailure);
   } catch (error) {
     errorNode.textContent = error.message || "The PO catalog could not be loaded.";
     errorNode.hidden = false;
@@ -314,7 +347,7 @@ async function readEvents(response) {
 }
 
 async function requestDecision(payload) {
-  const response = await fetch(runEndpoint, {
+  const response = await fetch(browserDemo ? `${endpoint}?ledger=browser` : endpoint, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(payload),
@@ -348,7 +381,7 @@ async function recordDecision(payload) {
 }
 
 async function runInvoice(getFile) {
-  if (state.busy || state.catalogBusy || !state.ready) return;
+  if (state.busy || state.catalogBusy || state.connecting) return;
   state.busy = true;
   state.finished = false;
   $("#result").hidden = true;
@@ -358,6 +391,14 @@ async function runInvoice(getFile) {
   try {
     const file = await getFile();
     selectFile(file);
+    if (!state.ready) {
+      $("#pipeline-status").textContent = "Waiting for ledger";
+      state.step = -1;
+      drawSteps();
+      showError("Invoice selected. Use the ledger option above to start the review.");
+      $("#ledger-action").focus();
+      return;
+    }
     const { readPdf } = await import("./pdf.js");
     const pages = await readPdf(file, (detail) => setStage("extract", detail));
     const outcome = await recordDecision({ filename: file.name.slice(0, 150), pages, use_ai: $("#ai-toggle").checked });
@@ -379,7 +420,7 @@ async function runInvoice(getFile) {
 
 window.addEventListener("storage", ({ key }) => {
   const currentKey = ledgerFor(state.catalog);
-  if (state.browserLedger && (key === currentKey || key === null)) {
+  if (state.ready && state.browserLedger && (key === currentKey || key === null)) {
     state.runs = browserLedger(currentKey).runs;
     renderHistory();
   }
@@ -388,6 +429,24 @@ window.addEventListener("storage", ({ key }) => {
 $("#nav-run").addEventListener("click", () => showView("run"));
 $("#nav-history").addEventListener("click", () => showView("history"));
 $("#history-new").addEventListener("click", () => showView("run"));
+$("#ledger-action").addEventListener("click", (event) => {
+  if (event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
+  event.preventDefault();
+  if (state.busy || state.catalogBusy || state.connecting) return;
+  browserDemo = !browserDemo;
+  const url = new URL(location.href);
+  if (browserDemo) url.searchParams.set("ledger", "browser");
+  else url.searchParams.delete("ledger");
+  window.history.replaceState(null, "", url);
+  $("#result").hidden = true;
+  $("#history-result").hidden = true;
+  $("#pipeline-status").textContent = "Waiting for invoice";
+  state.step = -1;
+  state.finished = false;
+  drawSteps();
+  showError("");
+  connectWorkspace();
+});
 $("#catalog-input").addEventListener("change", ({ target }) => {
   if (target.files[0]) changeCatalog(target.files[0]);
 });
@@ -428,14 +487,6 @@ $("#history-list").addEventListener("click", (event) => {
 drawSteps();
 renderHistory();
 renderSamples(Object.keys(labels));
-renderControls();
-refreshWorkspace(rememberedCatalog()).catch((error) => {
-  $("#connection").dataset.state = "error";
-  $("#connection").innerHTML = "<i></i> Ledger unavailable";
-  $("#catalog-status").textContent = "Purchase orders are waiting for the ledger connection.";
-  if (browserDemo) {
-    showLedgerNotice(error.message, location.pathname, "Retry configured ledger");
-  } else {
-    showLedgerNotice(error.message, "?ledger=browser", "Use browser demo");
-  }
-});
+state.catalog = rememberedCatalog();
+renderCatalog();
+connectWorkspace();

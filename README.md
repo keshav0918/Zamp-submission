@@ -13,7 +13,7 @@ With `DATABASE_URL` set, PostgreSQL stores invoice decisions, approval balances,
 
 Without `DATABASE_URL`, the demo runs each reconciliation in memory using SQLite and saves its ledger in the browser. The status reads **Ledger connected** in that mode.
 
-If the configured ledger is unavailable, the sample PDFs stay visible. Select **Use browser demo** to run the same workflow with separate browser-only approvals and history. Use **Retry configured ledger** to reconnect after updating the deployment.
+If the configured ledger is unavailable, you can still select a PDF and validate a PO CSV. Select **Use browser demo** to run the same workflow with your selected files and separate browser-only approvals and history. Use **Retry configured ledger** to reconnect after updating the deployment.
 
 ## Run locally
 
