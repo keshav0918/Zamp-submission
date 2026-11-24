@@ -2,6 +2,7 @@
 
 from http.client import HTTPException
 import json
+from urllib.error import HTTPError, URLError
 from urllib.parse import urlsplit
 from urllib.request import HTTPRedirectHandler, Request, build_opener
 
@@ -63,6 +64,29 @@ def _validate(response, allowed_pos):
     return {"summary": summary.strip(), "suggested_po": suggestion, "next_steps": [step.strip() for step in steps]}
 
 
+def _http_error(error):
+    try:
+        body = json.loads(error.read(4096))
+        code = body.get("error", {}).get("code")
+    except (ValueError, OSError, AttributeError):
+        code = None
+    finally:
+        error.close()
+    if error.code == 401:
+        return "The provider rejected the API key. Check LLM_API_KEY in Vercel."
+    if error.code in (400, 404) and code in ("model_decommissioned", "model_not_found"):
+        return "The configured model is unavailable. Check LLM_MODEL against your provider's active models."
+    if error.code == 403:
+        return "The API key lacks access to this request. Check the key permissions and LLM_MODEL."
+    if error.code == 404:
+        return "The provider could not find the endpoint or model. Check LLM_BASE_URL and LLM_MODEL."
+    if error.code == 429:
+        return "The provider reported a rate or quota limit. Check your provider dashboard and retry."
+    if 500 <= error.code < 600:
+        return f"The provider returned a server error (HTTP {error.code}). Try again shortly."
+    return f"The provider rejected the request (HTTP {error.code}). Check LLM_BASE_URL and LLM_MODEL."
+
+
 def infer_review(outcome, base_url, model, api_key):
     """Request a suggested PO and verification steps from a Chat Completions API."""
     evidence = _evidence(outcome)
@@ -70,16 +94,21 @@ def infer_review(outcome, base_url, model, api_key):
         endpoint = urlsplit(base_url)
         if (endpoint.scheme != "https" or not endpoint.hostname or endpoint.username is not None
                 or endpoint.password is not None or endpoint.query or endpoint.fragment):
-            raise ValueError("Expected an HTTPS API base URL")
+            raise InferenceUnavailable("Set LLM_BASE_URL to the provider's HTTPS API base URL.")
+        if endpoint.path.rstrip("/").endswith("/chat/completions"):
+            raise InferenceUnavailable("Remove /chat/completions from LLM_BASE_URL. The app adds it automatically.")
+        payload = {
+            "model": model,
+            "messages": [
+                {"role": "system", "content": SYSTEM_PROMPT},
+                {"role": "user", "content": json.dumps(evidence)},
+            ],
+        }
+        if endpoint.hostname == "api.groq.com":
+            payload["response_format"] = {"type": "json_object"}
         request = Request(
             f"{base_url.rstrip('/')}/chat/completions",
-            data=json.dumps({
-                "model": model,
-                "messages": [
-                    {"role": "system", "content": SYSTEM_PROMPT},
-                    {"role": "user", "content": json.dumps(evidence)},
-                ],
-            }).encode(),
+            data=json.dumps(payload).encode(),
             headers={"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"},
             method="POST",
         )
@@ -95,5 +124,14 @@ def infer_review(outcome, base_url, model, api_key):
             message = message[7:-3].strip()
         allowed_pos = {candidate["PO"] for candidate in evidence["po_candidates"]}
         return _validate(message, allowed_pos)
-    except (OSError, HTTPException, ValueError, KeyError, IndexError, TypeError) as error:
-        raise InferenceUnavailable("Check the API configuration or try again later.") from error
+    except HTTPError as error:
+        raise InferenceUnavailable(_http_error(error)) from None
+    except (TimeoutError, URLError) as error:
+        message = "The provider timed out. Try again." if isinstance(
+            getattr(error, "reason", error), TimeoutError
+        ) else "The server could not reach the provider. Check LLM_BASE_URL and retry."
+        raise InferenceUnavailable(message) from None
+    except (OSError, HTTPException):
+        raise InferenceUnavailable("The provider connection failed. Try again.") from None
+    except (ValueError, KeyError, IndexError, TypeError):
+        raise InferenceUnavailable("The model returned unusable guidance. Retry or select a JSON-capable text model.") from None

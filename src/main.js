@@ -152,7 +152,9 @@ function renderResult(container, outcome, runId) {
       ${guidance.suggested_po ? `<p class="meta"><strong>Suggested PO</strong> · ${escape(guidance.suggested_po)}</p>` : ""}
       <p class="meta">${escape(guidance.summary)}</p>
       <ol class="reasons">${guidance.next_steps.map((step) => `<li>${escape(step)}</li>`).join("")}</ol></section>`
-    : outcome.advice_unavailable ? '<p class="empty">AI guidance was unavailable. The decision and evidence were saved.</p>' : "";
+    : outcome.advice_unavailable ? `<section class="card"><h3>AI guidance unavailable</h3>
+      ${outcome.advice_error ? `<p class="meta">${escape(outcome.advice_error)}</p>` : ""}
+      <p class="meta">The decision and evidence were saved.</p></section>` : "";
   container.innerHTML = header + candidates + lines + advice;
   container.hidden = false;
 }

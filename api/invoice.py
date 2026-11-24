@@ -121,8 +121,8 @@ def uploaded_catalog(text):
 
 
 def inference_settings():
-    return {"api_key": os.environ.get("LLM_API_KEY"), "base_url": os.environ.get("LLM_BASE_URL"),
-            "model": os.environ.get("LLM_MODEL")}
+    return {"api_key": os.environ.get("LLM_API_KEY", "").strip(), "base_url": os.environ.get("LLM_BASE_URL", "").strip(),
+            "model": os.environ.get("LLM_MODEL", "").strip()}
 
 
 @app.get("/")
@@ -200,8 +200,10 @@ def run_invoice(payload: RunRequest | CatalogRequest, request: Request,
                             outcome = save_review_advice(outcome, advice, scope=storage_scope, **database)
                         else:
                             outcome["review_advice"] = advice
-                    except InferenceUnavailable:
+                    except InferenceUnavailable as error:
+                        log.warning("AI review guidance failed: %s", error)
                         outcome["advice_unavailable"] = True
+                        outcome["advice_error"] = str(error)
                     except Exception:
                         log.exception("Could not save AI guidance")
                         outcome["advice_unavailable"] = True
