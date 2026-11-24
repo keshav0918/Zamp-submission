@@ -65,11 +65,14 @@ def _validate(response, allowed_pos):
 
 
 def _http_error(error):
+    code = message = ""
     try:
         body = json.loads(error.read(4096))
-        code = body.get("error", {}).get("code")
+        provider_error = body.get("error", {})
+        code = str(provider_error.get("code") or "").lower()
+        message = str(provider_error.get("message") or "").lower()
     except (ValueError, OSError, AttributeError):
-        code = None
+        pass
     finally:
         error.close()
     if error.code == 401:
@@ -77,7 +80,18 @@ def _http_error(error):
     if error.code in (400, 404) and code in ("model_decommissioned", "model_not_found"):
         return "The configured model is unavailable. Check LLM_MODEL against your provider's active models."
     if error.code == 403:
-        return "The API key lacks access to this request. Check the key permissions and LLM_MODEL."
+        if any(term in f"{code} {message}" for term in (
+            "ip address", "ip_address", "ip_not_allowed", "unsupported country",
+            "unsupported_country", "geographic restriction",
+        )):
+            return "The provider blocked the deployment's network or location (HTTP 403). Check the provider's access policies."
+        if code.startswith("model_permission_blocked") or any(term in message for term in (
+            "model permission", "restricted model", "blocked model", "does not have access to the model",
+        )):
+            return "The provider blocked this model (HTTP 403). Enable LLM_MODEL for the API key's project and organization."
+        if code in ("organization_restricted", "organization_disabled", "project_restricted", "project_disabled"):
+            return "The provider restricted this project or organization (HTTP 403). Check its status in the provider dashboard."
+        return "The provider denied the request (HTTP 403). Check project model permissions or provider access policies."
     if error.code == 404:
         return "The provider could not find the endpoint or model. Check LLM_BASE_URL and LLM_MODEL."
     if error.code == 429:
